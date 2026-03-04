@@ -4,6 +4,7 @@ import { useEngineStore } from "./stores/engine";
 import { useWorkspaceStore, type FsEntry } from "./stores/workspace";
 import { useUiStore } from "./stores/ui";
 import { useStreamStore } from "./stores/stream";
+import { useCommandStore } from "./stores/commandStore";
 import { getPiStatus, openWorkspace } from "./lib/ipc";
 import { onPiEvent } from "./lib/pi-events";
 import { SplitPane } from "./components/Layout/SplitPane";
@@ -13,8 +14,12 @@ import { EditorTabs } from "./components/Editor/EditorTabs";
 import { MonacoEditor } from "./components/Editor/MonacoEditor";
 import { AgentPanel } from "./components/AgentPanel/AgentPanel";
 import { ContextDial } from "./components/StatusBar/ContextDial";
+import { GitStatus } from "./components/StatusBar/GitStatus";
 import { ContextInspector } from "./components/ContextInspector/ContextInspector";
 import { ApprovalDialog } from "./components/Approval/ApprovalDialog";
+import { CommandPalette } from "./components/CommandPalette/CommandPalette";
+import { SettingsModal } from "./components/Settings/SettingsModal";
+import { useSettingsStore } from "./stores/settingsStore";
 import { initApprovalListener } from "./stores/approvalStore";
 import "./styles/global.css";
 
@@ -38,7 +43,7 @@ export function App() {
   const { status, setStatus } = useEngineStore();
   const { rootPath, setRootPath, setFileTree, openTabs, activeTabPath, updateTabContent } =
     useWorkspaceStore();
-  const { startLoading, stopLoading } = useUiStore();
+  const { startLoading, stopLoading, fileTreeVisible } = useUiStore();
 
   const { handlePiEvent } = useStreamStore();
 
@@ -74,6 +79,60 @@ export function App() {
       clearInterval(interval);
     };
   }, [setStatus]);
+
+  // Register global keyboard shortcuts
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      const meta = e.metaKey || e.ctrlKey;
+      if (meta && e.shiftKey && e.key === "p") {
+        e.preventDefault();
+        useCommandStore.getState().open();
+      } else if (meta && e.key === "b") {
+        e.preventDefault();
+        useUiStore.getState().toggleFileTree();
+      } else if (meta && e.key === ",") {
+        e.preventDefault();
+        useSettingsStore.getState().open();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
+  // Register commands
+  useEffect(() => {
+    useCommandStore.getState().registerMany([
+      {
+        id: "tide.openFolder",
+        label: "Open Folder",
+        category: "File",
+        shortcut: "Cmd+O",
+        execute: () => handleOpenFolder(),
+      },
+      {
+        id: "tide.toggleFileTree",
+        label: "Toggle File Tree",
+        category: "View",
+        shortcut: "Cmd+B",
+        execute: () => useUiStore.getState().toggleFileTree(),
+      },
+      {
+        id: "tide.openSettings",
+        label: "Open Settings",
+        category: "Settings",
+        shortcut: "Cmd+,",
+        keywords: ["preferences", "config", "api", "keys"],
+        execute: () => useSettingsStore.getState().open(),
+      },
+      {
+        id: "tide.commandPalette",
+        label: "Command Palette",
+        category: "View",
+        shortcut: "Cmd+Shift+P",
+        execute: () => useCommandStore.getState().open(),
+      },
+    ]);
+  }, []);
 
   const handleOpenFolder = useCallback(async () => {
     try {
@@ -125,22 +184,49 @@ export function App() {
       {/* Main content area */}
       <div style={s.main}>
         {rootPath ? (
-          /* File Tree | Editor | Agent Panel */
-          <SplitPane direction="vertical" initialSize={250} minSize={150} maxSize={500}>
-            {/* Left sidebar: File Tree */}
-            <div style={s.sidebar}>
-              <div style={s.sidebarHeader}>
-                <span>Explorer</span>
-                <button style={s.openBtn} onClick={handleOpenFolder} title="Open Folder">
-                  ...
-                </button>
+          fileTreeVisible ? (
+            /* File Tree | Editor | Agent Panel */
+            <SplitPane direction="vertical" initialSize={250} minSize={150} maxSize={500}>
+              {/* Left sidebar: File Tree */}
+              <div style={s.sidebar}>
+                <div style={s.sidebarHeader}>
+                  <span>Explorer</span>
+                  <button style={s.openBtn} onClick={handleOpenFolder} title="Open Folder">
+                    ...
+                  </button>
+                </div>
+                <FileTree />
               </div>
-              <FileTree />
-            </div>
 
-            {/* Editor + Agent Panel */}
+              {/* Editor + Agent Panel */}
+              <SplitPane direction="vertical" initialSize={350} minSize={250} maxSize={600} side="end">
+                {/* Center: Editor area */}
+                <div style={s.editorArea}>
+                  <EditorTabs />
+                  <div style={s.editorContent}>
+                    {activeTab ? (
+                      <MonacoEditor
+                        content={activeTab.content}
+                        language={activeTab.language}
+                        path={activeTab.path}
+                        readOnly={true}
+                        onChange={(value) => updateTabContent(activeTab.path, value)}
+                      />
+                    ) : (
+                      <div style={s.emptyEditor}>
+                        <p>Open a file from the explorer</p>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Right: Agent Panel */}
+                <AgentPanel />
+              </SplitPane>
+            </SplitPane>
+          ) : (
+            /* Editor | Agent Panel (no file tree) */
             <SplitPane direction="vertical" initialSize={350} minSize={250} maxSize={600} side="end">
-              {/* Center: Editor area */}
               <div style={s.editorArea}>
                 <EditorTabs />
                 <div style={s.editorContent}>
@@ -160,10 +246,9 @@ export function App() {
                 </div>
               </div>
 
-              {/* Right: Agent Panel */}
               <AgentPanel />
             </SplitPane>
-          </SplitPane>
+          )
         ) : (
           <div style={s.welcome}>
             <h2 style={s.welcomeTitle}>Welcome to Tide</h2>
@@ -181,14 +266,15 @@ export function App() {
         {rootPath && (
           <span style={s.rootPathLabel}>{rootPath.split("/").pop()}</span>
         )}
+        <GitStatus />
         <div style={{ flex: 1 }} />
         <ContextDial />
       </div>
 
-      {/* Context Inspector overlay */}
+      {/* Overlays */}
+      <CommandPalette />
+      <SettingsModal />
       <ContextInspector />
-
-      {/* Approval dialog overlay */}
       <ApprovalDialog />
     </div>
   );

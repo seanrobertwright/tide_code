@@ -25,13 +25,13 @@
         "src/stores/ui.ts",
         "src/App.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "high"
     },
     {
       "id": "TIDE-056",
       "title": "Build Settings Panel + API Key Management",
-      "description": "Settings modal (640px, 80vh) with sidebar nav (Providers, Safety, Skills). Rust keychain.rs using security-framework crate for macOS Keychain. 4 Tauri commands: keychain_set_key, keychain_get_key, keychain_delete_key, keychain_list_providers. TypeScript wrappers in keychain.ts. ProviderSettings.tsx shows cards per provider (Anthropic, OpenAI, Google) with status badges, password input for editing, never displays actual keys.",
+      "description": "Settings modal (640px, 80vh) with sidebar nav (Providers, Safety, Skills). Rust keychain.rs using security-framework crate for macOS Keychain. 4 Tauri commands: keychain_set_key, keychain_get_key, keychain_delete_key, keychain_has_key. TypeScript wrappers in keychain.ts. ProviderSettings.tsx shows cards per provider (Anthropic, OpenAI, Google) with status badges, password input for editing, never displays actual keys.",
       "files": [
         "src-tauri/src/keychain.rs",
         "src-tauri/src/lib.rs",
@@ -44,7 +44,7 @@
         "src/components/Settings/SkillsPlaceholder.tsx",
         "src/App.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "high"
     },
     {
@@ -55,7 +55,7 @@
         "src/components/Approval/ApprovalDialog.tsx",
         "src/stores/approvalStore.ts"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     },
     {
@@ -70,18 +70,18 @@
         "src/lib/ipc.ts",
         "src/App.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     },
     {
       "id": "TIDE-059",
       "title": "Add Markdown Rendering in Agent Chat",
-      "description": "Replace raw <pre> text in AgentPanel with a MessageRenderer component using react-markdown + react-syntax-highlighter. Code blocks get syntax highlighting with the Tide dark theme. Inline code, headers, links, lists all rendered properly. Dramatically improves readability of agent responses.",
+      "description": "Replace raw <pre> text in AgentPanel with a MessageRenderer component using react-markdown. Code blocks rendered with language headers, inline code styled with accent color, headers/lists/links/blockquotes all rendered properly. Dramatically improves readability of agent responses.",
       "files": [
         "src/components/AgentPanel/MessageRenderer.tsx",
         "src/components/AgentPanel/AgentPanel.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     }
   ]

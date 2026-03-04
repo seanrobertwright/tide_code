@@ -1,4 +1,6 @@
+mod git;
 mod ipc;
+mod keychain;
 mod sidecar;
 
 use ipc::PiConnection;
@@ -43,6 +45,81 @@ async fn abort_agent(
     let cmd = serde_json::json!({ "type": "abort" });
     conn.send(&cmd).await.map_err(|e| e.to_string())?;
     Ok(())
+}
+
+/// Restart Pi agent (e.g. after changing API keys).
+#[tauri::command]
+async fn restart_pi(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+) -> Result<(), String> {
+    // Kill existing Pi process
+    {
+        let mut child_guard = state._pi_child.lock().await;
+        if let Some(mut child) = child_guard.take() {
+            let _ = child.kill().await;
+            tracing::info!("Killed existing Pi process");
+        }
+        let mut pi = state.pi.lock().await;
+        *pi = None;
+    }
+
+    // Determine workspace root (fall back to cwd)
+    let workspace = {
+        let root = state.workspace_root.lock().await;
+        root.clone().unwrap_or_else(|| {
+            std::env::current_dir()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_else(|_| ".".to_string())
+        })
+    };
+
+    let extensions = resolve_extension_paths();
+    let pi_state = state.pi.clone();
+    let child_state = state._pi_child.clone();
+
+    match sidecar::start_pi(&workspace, &extensions).await {
+        Ok((conn, child)) => {
+            tracing::info!("Pi agent restarted successfully");
+
+            // Re-wire event forwarding
+            let event_rx = conn.event_rx.clone();
+            let handle = app_handle.clone();
+            tokio::spawn(async move {
+                let mut rx = event_rx.lock().await;
+                loop {
+                    match rx.recv().await {
+                        Some(event) => {
+                            let event_type = event
+                                .get("type")
+                                .and_then(|t| t.as_str())
+                                .unwrap_or("unknown");
+                            if let Err(e) = handle.emit("pi_event", &event) {
+                                tracing::error!("Failed to emit pi_event ({}): {}", event_type, e);
+                            }
+                            if event_type == "extension_ui_request" {
+                                let _ = handle.emit("pi_ui_request", &event);
+                            }
+                        }
+                        None => {
+                            tracing::info!("Pi event channel closed");
+                            break;
+                        }
+                    }
+                }
+            });
+
+            let mut pi = pi_state.lock().await;
+            *pi = Some(conn);
+            let mut child_guard = child_state.lock().await;
+            *child_guard = Some(child);
+            Ok(())
+        }
+        Err(e) => {
+            tracing::error!("Failed to restart Pi: {}", e);
+            Err(format!("Failed to restart Pi: {}", e))
+        }
+    }
 }
 
 /// Get Pi connection status.
@@ -181,6 +258,39 @@ fn detect_language(path: &str) -> &str {
     }
 }
 
+// ── Keychain Commands ───────────────────────────────────────
+
+#[tauri::command]
+async fn keychain_set_key(provider: String, key: String) -> Result<(), String> {
+    keychain::set_key(&provider, &key)
+}
+
+#[tauri::command]
+async fn keychain_get_key(provider: String) -> Result<Option<String>, String> {
+    keychain::get_key(&provider)
+}
+
+#[tauri::command]
+async fn keychain_delete_key(provider: String) -> Result<(), String> {
+    keychain::delete_key(&provider)
+}
+
+#[tauri::command]
+async fn keychain_has_key(provider: String) -> Result<bool, String> {
+    Ok(keychain::has_key(&provider))
+}
+
+// ── Git Commands ────────────────────────────────────────────
+
+#[tauri::command]
+async fn git_status(
+    state: tauri::State<'_, AppState>,
+) -> Result<git::GitStatusInfo, String> {
+    let root = state.workspace_root.lock().await;
+    let workspace = root.as_deref().ok_or("No workspace open")?;
+    git::get_status(workspace)
+}
+
 // ── App Setup ───────────────────────────────────────────────
 
 fn resolve_extension_paths() -> Vec<String> {
@@ -290,12 +400,18 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             send_prompt,
             abort_agent,
+            restart_pi,
             get_pi_status,
             get_pi_state,
             respond_ui_request,
             open_workspace,
             fs_list_dir,
             fs_read_file,
+            keychain_set_key,
+            keychain_get_key,
+            keychain_delete_key,
+            keychain_has_key,
+            git_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tide");

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from "react";
 import { useStreamStore } from "../../stores/stream";
 import { sendPrompt, abortAgent } from "../../lib/ipc";
 import { LogsTab } from "./LogsTab";
+import { MessageRenderer } from "./MessageRenderer";
 
 type TabId = "chat" | "logs";
 
@@ -73,7 +74,7 @@ export function AgentPanel() {
         <>
           <div ref={outputRef} style={panelStyles.output}>
             {content ? (
-              <pre style={panelStyles.outputText}>{content}</pre>
+              <MessageRenderer content={content} />
             ) : (
               <p style={panelStyles.placeholder}>
                 Send a message to start the agent...

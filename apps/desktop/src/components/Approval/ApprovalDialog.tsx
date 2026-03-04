@@ -1,5 +1,6 @@
 import { useEffect, useCallback } from "react";
 import { useApprovalStore } from "../../stores/approvalStore";
+import { DiffPreview } from "../DiffPreview/DiffPreview";
 
 export function ApprovalDialog() {
   const { currentApproval, respondToApproval } = useApprovalStore();
@@ -37,10 +38,14 @@ export function ApprovalDialog() {
   if (!currentApproval) return null;
 
   const isCommand = currentApproval.safetyLevel === "command";
+  const hasDiff =
+    currentApproval.filePath &&
+    currentApproval.originalContent !== undefined &&
+    currentApproval.newContent !== undefined;
 
   return (
     <div style={s.overlay}>
-      <div style={s.dialog}>
+      <div style={{ ...s.dialog, ...(hasDiff ? s.dialogWide : {}) }}>
         {/* Header */}
         <div style={s.header}>
           <span style={s.title}>{currentApproval.title}</span>
@@ -66,6 +71,17 @@ export function ApprovalDialog() {
             <pre style={s.args}>{currentApproval.message}</pre>
           )}
         </div>
+
+        {/* Diff preview (when write/edit tool provides file content) */}
+        {hasDiff && (
+          <div style={s.diffContainer}>
+            <DiffPreview
+              filePath={currentApproval.filePath!}
+              originalContent={currentApproval.originalContent!}
+              modifiedContent={currentApproval.newContent!}
+            />
+          </div>
+        )}
 
         {/* Actions */}
         <div style={s.actions}>
@@ -106,6 +122,15 @@ const s: Record<string, React.CSSProperties> = {
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-md)",
     overflow: "hidden",
+  },
+  dialogWide: {
+    width: "80vw",
+    maxWidth: 900,
+  },
+  diffContainer: {
+    height: 300,
+    borderTop: "1px solid var(--border)",
+    borderBottom: "1px solid var(--border)",
   },
   header: {
     display: "flex",

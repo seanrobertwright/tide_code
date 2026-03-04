@@ -8,6 +8,10 @@ export interface ApprovalRequest {
   message: string;
   toolName?: string;
   safetyLevel?: string;
+  /** Diff preview data (populated by tide-safety.ts for write/edit tools) */
+  filePath?: string;
+  originalContent?: string;
+  newContent?: string;
 }
 
 interface ApprovalState {
@@ -59,12 +63,16 @@ export function initApprovalListener(): void {
   onPiUiRequest((event: PiUiRequest) => {
     // Map Pi's extension_ui_request to our ApprovalRequest format
     if (event.method === "confirm") {
+      const payload = event as any;
       useApprovalStore.getState().addApproval({
         requestId: event.id,
         title: event.title || "Approval Required",
         message: event.message || "",
-        toolName: (event as any).toolName,
-        safetyLevel: (event as any).safetyLevel,
+        toolName: payload.toolName,
+        safetyLevel: payload.safetyLevel,
+        filePath: payload.filePath,
+        originalContent: payload.originalContent,
+        newContent: payload.newContent,
       });
     }
   }).catch((err) => {

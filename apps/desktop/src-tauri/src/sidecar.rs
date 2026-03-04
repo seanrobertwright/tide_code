@@ -1,8 +1,34 @@
 use crate::ipc::PiConnection;
+use crate::keychain;
 use std::path::PathBuf;
 use std::process::Stdio;
 use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::process::{Child, Command};
+
+/// Provider name (Pi CLI) → (keychain key, env var name)
+const PROVIDER_KEYS: &[(&str, &str, &str)] = &[
+    ("anthropic", "anthropic", "ANTHROPIC_API_KEY"),
+    ("openai",    "openai",    "OPENAI_API_KEY"),
+    ("google",    "google",    "GEMINI_API_KEY"),
+];
+
+/// Inject API keys from the macOS Keychain as environment variables.
+/// Returns the name of the first provider that has a key configured.
+fn inject_api_keys(cmd: &mut Command) -> Option<&'static str> {
+    let mut first_provider = None;
+
+    for (provider, keychain_name, env_var) in PROVIDER_KEYS {
+        if let Ok(Some(key)) = keychain::get_key(keychain_name) {
+            tracing::info!("Injecting {} from Keychain", env_var);
+            cmd.env(env_var, key);
+            if first_provider.is_none() {
+                first_provider = Some(*provider);
+            }
+        }
+    }
+
+    first_provider
+}
 
 /// Start the Pi agent in RPC mode and return a PiConnection + child handle.
 pub async fn start_pi(
@@ -18,6 +44,12 @@ pub async fn start_pi(
 
     for ext in extensions {
         cmd.arg("-e").arg(ext);
+    }
+
+    // Inject API keys from Keychain as env vars and auto-detect provider
+    if let Some(provider) = inject_api_keys(&mut cmd) {
+        tracing::info!("Auto-detected provider from Keychain: {}", provider);
+        cmd.arg("--provider").arg(provider);
     }
 
     cmd.current_dir(workspace_root);
