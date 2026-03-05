@@ -2,7 +2,6 @@ import { useRef, useCallback, useState } from "react";
 import Editor, { type OnMount } from "@monaco-editor/react";
 import type { editor } from "monaco-editor";
 import { useRegionTags } from "./useRegionTags";
-import { RegionTagPopover } from "./RegionTagPopover";
 
 interface MonacoEditorProps {
   content: string;
@@ -21,8 +20,7 @@ export function MonacoEditor({
 }: MonacoEditorProps) {
   const editorRef = useRef<editor.IStandaloneCodeEditor | null>(null);
   const [editorReady, setEditorReady] = useState<editor.IStandaloneCodeEditor | null>(null);
-  const { showPopover, popoverPosition, handleCreateTag, handleCancelPopover } =
-    useRegionTags(editorReady, path);
+  useRegionTags(editorReady, path);
 
   const handleMount: OnMount = useCallback((editor, monaco) => {
     editorRef.current = editor;
@@ -58,37 +56,28 @@ export function MonacoEditor({
   );
 
   return (
-    <>
-      <Editor
-        height="100%"
-        language={language}
-        value={content}
-        path={path}
-        theme="vs-dark"
-        onMount={handleMount}
-        onChange={handleChange}
-        options={{
-          readOnly,
-          minimap: { enabled: false },
-          fontSize: 13,
-          fontFamily: "var(--font-mono)",
-          lineNumbers: "on",
-          renderLineHighlight: "line",
-          scrollBeyondLastLine: false,
-          automaticLayout: true,
-          tabSize: 2,
-          wordWrap: "off",
-          padding: { top: 8 },
-          glyphMargin: true,
-        }}
-      />
-      {showPopover && popoverPosition && (
-        <RegionTagPopover
-          position={popoverPosition}
-          onCreateTag={handleCreateTag}
-          onCancel={handleCancelPopover}
-        />
-      )}
-    </>
+    <Editor
+      height="100%"
+      language={language}
+      value={content}
+      path={path}
+      theme="vs-dark"
+      onMount={handleMount}
+      onChange={handleChange}
+      options={{
+        readOnly,
+        minimap: { enabled: false },
+        fontSize: 13,
+        fontFamily: "var(--font-mono)",
+        lineNumbers: "on",
+        renderLineHighlight: "line",
+        scrollBeyondLastLine: false,
+        automaticLayout: true,
+        tabSize: 2,
+        wordWrap: "off",
+        padding: { top: 8 },
+        glyphMargin: true,
+      }}
+    />
   );
 }

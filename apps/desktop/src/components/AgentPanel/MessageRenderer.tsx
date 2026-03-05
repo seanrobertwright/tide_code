@@ -1,4 +1,29 @@
+import { useState, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
+import { openFileByPath } from "../../lib/fileHelpers";
+
+const FILE_EXTENSIONS = /\.(tsx?|jsx?|rs|json|md|css|html|py|go|toml|yaml|yml|sh|sql|lock|cfg|ini|env|xml|svg)$/;
+function isFilePath(text: string): boolean {
+  if (FILE_EXTENSIONS.test(text)) return true;
+  if (/^(src|apps|\.\.?)\//i.test(text)) return true;
+  return false;
+}
+
+function FileLink({ children, text }: { children: React.ReactNode; text: string }) {
+  const [hovered, setHovered] = useState(false);
+  const handleClick = useCallback(() => openFileByPath(text), [text]);
+  return (
+    <code
+      style={{ ...s.inlineCode, ...s.fileLink, ...(hovered ? s.fileLinkHover : {}) }}
+      onClick={handleClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      title={`Open ${text}`}
+    >
+      {children}
+    </code>
+  );
+}
 
 interface MessageRendererProps {
   content: string;
@@ -23,6 +48,11 @@ export function MessageRenderer({ content }: MessageRendererProps) {
                   </pre>
                 </div>
               );
+            }
+            // Check if inline code looks like a file path
+            const text = String(children).trim();
+            if (isFilePath(text)) {
+              return <FileLink text={text}>{children}</FileLink>;
             }
             return <code style={s.inlineCode} {...props}>{children}</code>;
           },
@@ -148,5 +178,15 @@ const s: Record<string, React.CSSProperties> = {
   strong: {
     color: "var(--text-bright)",
     fontWeight: 600,
+  },
+  fileLink: {
+    cursor: "pointer",
+    textDecoration: "underline",
+    textDecorationColor: "var(--accent)",
+    textDecorationThickness: 1,
+    textUnderlineOffset: 2,
+  },
+  fileLinkHover: {
+    background: "rgba(96, 165, 250, 0.2)",
   },
 };

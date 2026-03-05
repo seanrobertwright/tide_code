@@ -1,139 +1,117 @@
 import { useEffect, useState, useMemo } from "react";
-import { useContextStore, type ContextItem } from "../../stores/contextStore";
+import { useContextStore } from "../../stores/contextStore";
+import { useRegionTagStore } from "../../stores/regionTagStore";
+import type { RegionTag } from "@tide/shared";
 
-const TYPE_ICONS: Record<string, string> = {
-  tide_rules: "R",
-  project_spec: "P",
-  feature_plan: "F",
-  region_tag: "T",
-  file_snippet: "S",
-  repo_map: "M",
-  session_summary: "H",
-  user_attachment: "A",
-};
-
-const TYPE_LABELS: Record<string, string> = {
-  tide_rules: "Tide Rules",
-  project_spec: "Project Spec",
-  feature_plan: "Feature Plan",
-  region_tag: "Region Tag",
-  file_snippet: "File Snippet",
-  repo_map: "Repo Map",
-  session_summary: "Session Summary",
-  user_attachment: "Attachment",
-};
-
-type FilterType = "all" | string;
+type FilterType = "all" | "pinned" | "unpinned";
 
 export function ContextInspector() {
-  const { contextPack, inspectorOpen, closeInspector, refreshItems, togglePin } =
-    useContextStore();
+  const { inspectorOpen, closeInspector, breakdown } = useContextStore();
+  const { tags, loadAllTags, togglePin, deleteTag } = useRegionTagStore();
   const [filter, setFilter] = useState<FilterType>("all");
   const [search, setSearch] = useState("");
 
   useEffect(() => {
     if (inspectorOpen) {
-      refreshItems();
+      loadAllTags();
     }
-  }, [inspectorOpen, refreshItems]);
+  }, [inspectorOpen, loadAllTags]);
 
-  const allItems = useMemo(() => {
-    if (!contextPack) return [];
-    return [...contextPack.items, ...contextPack.trimmedItems];
-  }, [contextPack]);
+  const allTags = useMemo(() => Array.from(tags.values()), [tags]);
 
-  const filteredItems = useMemo(() => {
-    let items = allItems;
-    if (filter !== "all") {
-      items = items.filter((i) => i.type === filter);
-    }
+  const filteredTags = useMemo(() => {
+    let items = allTags;
+    if (filter === "pinned") items = items.filter((t) => t.pinned);
+    if (filter === "unpinned") items = items.filter((t) => !t.pinned);
     if (search.trim()) {
       const q = search.toLowerCase();
       items = items.filter(
-        (i) =>
-          i.source.toLowerCase().includes(q) ||
-          i.content.toLowerCase().includes(q),
+        (t) =>
+          t.label.toLowerCase().includes(q) ||
+          t.filePath.toLowerCase().includes(q) ||
+          (t.note && t.note.toLowerCase().includes(q)),
       );
     }
     return items;
-  }, [allItems, filter, search]);
+  }, [allTags, filter, search]);
 
-  const trimmedIds = useMemo(() => {
-    if (!contextPack) return new Set<string>();
-    return new Set(contextPack.trimmedItems.map((i) => i.id));
-  }, [contextPack]);
+  const pinnedCount = useMemo(() => allTags.filter((t) => t.pinned).length, [allTags]);
 
-  // Unique types for filter dropdown
-  const availableTypes = useMemo(() => {
-    const types = new Set(allItems.map((i) => i.type));
-    return Array.from(types).sort();
-  }, [allItems]);
+  useEffect(() => {
+    if (!inspectorOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeInspector();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [inspectorOpen, closeInspector]);
 
   if (!inspectorOpen) return null;
 
   return (
-    <div style={s.overlay}>
-      <div style={s.panel}>
+    <div style={s.overlay} onClick={closeInspector}>
+      <div style={s.panel} onClick={(e) => e.stopPropagation()}>
         <div style={s.header}>
           <span style={s.title}>Context Inspector</span>
           <button style={s.closeBtn} onClick={closeInspector} type="button">
-            x
+            &times;
           </button>
         </div>
 
         {/* Summary */}
-        {contextPack && (
-          <div style={s.summary}>
-            <span>
-              {contextPack.items.length} items | {contextPack.totalTokens.toLocaleString()} / {contextPack.budgetTokens.toLocaleString()} tokens
+        <div style={s.summary}>
+          <span>{allTags.length} tags ({pinnedCount} pinned)</span>
+          {breakdown && (
+            <span style={{ color: breakdown.usagePercent > 0.85 ? "var(--error)" : "var(--text-secondary)" }}>
+              {breakdown.totalTokens.toLocaleString()} / {breakdown.budgetTokens.toLocaleString()} tokens ({Math.round(breakdown.usagePercent * 100)}%)
             </span>
-            <span style={{ color: contextPack.usagePercent > 0.9 ? "var(--error)" : "var(--text-secondary)" }}>
-              {Math.round(contextPack.usagePercent * 100)}% used
-            </span>
-          </div>
-        )}
+          )}
+        </div>
+
+        {/* Info */}
+        <div style={s.info}>
+          Pinned tags are automatically injected into the agent's system prompt.
+          Click a tag label to reference it in chat.
+        </div>
 
         {/* Filters */}
         <div style={s.filters}>
           <input
             style={s.searchInput}
             type="text"
-            placeholder="Search..."
+            placeholder="Search tags..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
           <select
             style={s.filterSelect}
             value={filter}
-            onChange={(e) => setFilter(e.target.value)}
+            onChange={(e) => setFilter(e.target.value as FilterType)}
           >
-            <option value="all">All types</option>
-            {availableTypes.map((t) => (
-              <option key={t} value={t}>
-                {TYPE_LABELS[t] ?? t}
-              </option>
-            ))}
+            <option value="all">All ({allTags.length})</option>
+            <option value="pinned">Pinned ({pinnedCount})</option>
+            <option value="unpinned">Unpinned ({allTags.length - pinnedCount})</option>
           </select>
         </div>
 
-        {/* Trimmed warning */}
-        {contextPack && contextPack.trimmedItems.length > 0 && (
-          <div style={s.trimWarning}>
-            {contextPack.trimmedItems.length} items trimmed from context
-          </div>
-        )}
-
-        {/* Item list */}
+        {/* Tag list */}
         <div style={s.itemList}>
-          {filteredItems.length === 0 ? (
-            <div style={s.emptyState}>No context items</div>
+          {filteredTags.length === 0 ? (
+            <div style={s.emptyState}>
+              {allTags.length === 0
+                ? "No tags yet. Select text in the editor and press Cmd+Shift+T to create one."
+                : "No matching tags"}
+            </div>
           ) : (
-            filteredItems.map((item) => (
-              <ContextItemRow
-                key={item.id}
-                item={item}
-                isTrimmed={trimmedIds.has(item.id)}
-                onTogglePin={() => togglePin(item.id)}
+            filteredTags.map((tag) => (
+              <TagRow
+                key={tag.id}
+                tag={tag}
+                onTogglePin={() => togglePin(tag.id)}
+                onDelete={() => deleteTag(tag.id)}
               />
             ))
           )}
@@ -143,34 +121,39 @@ export function ContextInspector() {
   );
 }
 
-function ContextItemRow({
-  item,
-  isTrimmed,
+function TagRow({
+  tag,
   onTogglePin,
+  onDelete,
 }: {
-  item: ContextItem;
-  isTrimmed: boolean;
+  tag: RegionTag;
   onTogglePin: () => void;
+  onDelete: () => void;
 }) {
   return (
-    <div style={{ ...s.itemRow, opacity: isTrimmed ? 0.5 : 1 }}>
-      <span style={s.typeIcon} title={TYPE_LABELS[item.type] ?? item.type}>
-        {TYPE_ICONS[item.type] ?? "?"}
-      </span>
-      <div style={s.itemInfo}>
-        <div style={s.itemSource}>{item.source}</div>
-        <div style={s.itemMeta}>
-          {item.tokenEstimate.toLocaleString()} tokens
-          {isTrimmed && <span style={s.trimBadge}>trimmed</span>}
+    <div style={s.tagRow}>
+      <button
+        style={{ ...s.pinBtn, color: tag.pinned ? "var(--accent)" : "var(--text-secondary)" }}
+        onClick={onTogglePin}
+        title={tag.pinned ? "Unpin from context" : "Pin to context"}
+        type="button"
+      >
+        {tag.pinned ? "\u{1F4CC}" : "\u25CB"}
+      </button>
+      <div style={s.tagInfo}>
+        <div style={s.tagLabel}>{tag.label}</div>
+        <div style={s.tagMeta}>
+          {tag.filePath}:{tag.startLine}-{tag.endLine}
+          {tag.note && <span style={s.tagNote}> &mdash; {tag.note}</span>}
         </div>
       </div>
       <button
-        style={{ ...s.pinBtn, color: item.pinned ? "var(--accent)" : "var(--text-secondary)" }}
-        onClick={onTogglePin}
-        title={item.pinned ? "Unpin" : "Pin to context"}
+        style={s.deleteBtn}
+        onClick={onDelete}
+        title="Delete tag"
         type="button"
       >
-        {item.pinned ? "P" : "o"}
+        &times;
       </button>
     </div>
   );
@@ -186,7 +169,7 @@ const s: Record<string, React.CSSProperties> = {
     justifyContent: "flex-end",
   },
   panel: {
-    width: 400,
+    width: 420,
     maxWidth: "80vw",
     height: "100%",
     background: "var(--bg-secondary)",
@@ -214,7 +197,7 @@ const s: Record<string, React.CSSProperties> = {
     border: "none",
     color: "var(--text-secondary)",
     cursor: "pointer",
-    fontSize: 14,
+    fontSize: 16,
     fontFamily: "var(--font-mono)",
     padding: "2px 6px",
   },
@@ -227,6 +210,14 @@ const s: Record<string, React.CSSProperties> = {
     borderBottom: "1px solid var(--border)",
     flexShrink: 0,
   },
+  info: {
+    padding: "8px 12px",
+    fontSize: "var(--font-size-xs)",
+    color: "var(--text-secondary)",
+    lineHeight: 1.4,
+    borderBottom: "1px solid var(--border)",
+    flexShrink: 0,
+  },
   filters: {
     display: "flex",
     gap: 6,
@@ -236,7 +227,7 @@ const s: Record<string, React.CSSProperties> = {
   },
   searchInput: {
     flex: 1,
-    background: "var(--bg-input)",
+    background: "var(--bg-primary)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-sm)",
     padding: "4px 8px",
@@ -246,7 +237,7 @@ const s: Record<string, React.CSSProperties> = {
     fontFamily: "var(--font-ui)",
   },
   filterSelect: {
-    background: "var(--bg-input)",
+    background: "var(--bg-primary)",
     border: "1px solid var(--border)",
     borderRadius: "var(--radius-sm)",
     padding: "4px 6px",
@@ -254,14 +245,6 @@ const s: Record<string, React.CSSProperties> = {
     color: "var(--text-primary)",
     outline: "none",
     fontFamily: "var(--font-ui)",
-  },
-  trimWarning: {
-    padding: "6px 12px",
-    fontSize: "var(--font-size-xs)",
-    color: "var(--warning)",
-    background: "rgba(234, 179, 8, 0.08)",
-    borderBottom: "1px solid var(--border)",
-    flexShrink: 0,
   },
   itemList: {
     flex: 1,
@@ -274,59 +257,55 @@ const s: Record<string, React.CSSProperties> = {
     color: "var(--text-secondary)",
     fontStyle: "italic",
     fontSize: "var(--font-size-sm)",
+    lineHeight: 1.5,
   },
-  itemRow: {
+  tagRow: {
     display: "flex",
     alignItems: "center",
     gap: 8,
-    padding: "6px 12px",
+    padding: "8px 12px",
     borderBottom: "1px solid rgba(60,60,60,0.3)",
-  },
-  typeIcon: {
-    width: 22,
-    height: 22,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    borderRadius: "var(--radius-sm)",
-    background: "var(--bg-tertiary)",
-    color: "var(--accent)",
-    fontSize: "var(--font-size-xs)",
-    fontWeight: 700,
-    fontFamily: "var(--font-mono)",
-    flexShrink: 0,
-  },
-  itemInfo: {
-    flex: 1,
-    minWidth: 0,
-  },
-  itemSource: {
-    fontSize: "var(--font-size-xs)",
-    color: "var(--text-primary)",
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap" as const,
-  },
-  itemMeta: {
-    fontSize: 10,
-    color: "var(--text-secondary)",
-    display: "flex",
-    alignItems: "center",
-    gap: 6,
-  },
-  trimBadge: {
-    fontSize: 9,
-    padding: "1px 4px",
-    borderRadius: 2,
-    background: "rgba(234, 179, 8, 0.15)",
-    color: "var(--warning)",
   },
   pinBtn: {
     background: "transparent",
     border: "none",
     cursor: "pointer",
     fontSize: 14,
+    padding: "2px 4px",
+    flexShrink: 0,
+  },
+  tagInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tagLabel: {
+    fontSize: "var(--font-size-sm)",
+    fontWeight: 600,
+    color: "var(--text-bright)",
     fontFamily: "var(--font-mono)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  tagMeta: {
+    fontSize: "var(--font-size-xs)",
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-mono)",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  tagNote: {
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-ui)",
+    fontStyle: "italic",
+  },
+  deleteBtn: {
+    background: "transparent",
+    border: "none",
+    cursor: "pointer",
+    fontSize: 16,
+    color: "var(--text-secondary)",
     padding: "2px 4px",
     flexShrink: 0,
   },

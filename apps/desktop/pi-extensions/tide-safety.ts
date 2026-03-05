@@ -100,12 +100,46 @@ function shouldRequireApproval(
   return false;
 }
 
-function formatToolCallDescription(toolName: string, args: Record<string, unknown>): string {
+function formatToolCallDescription(
+  toolName: string,
+  args: Record<string, unknown>,
+  workspaceRoot: string,
+): string {
   switch (toolName) {
-    case "write":
-      return `Write to: ${args.path || "unknown"}`;
-    case "edit":
-      return `Edit: ${args.path || "unknown"}`;
+    case "write": {
+      const filePath = typeof args.path === "string" ? args.path : "unknown";
+      const newContent = typeof args.content === "string" ? args.content : "";
+      // Read existing file content for diff preview
+      let originalContent = "";
+      try {
+        const absPath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+        if (fs.existsSync(absPath)) {
+          originalContent = fs.readFileSync(absPath, "utf-8");
+        }
+      } catch { /* new file */ }
+      // Encode diff data as JSON after a delimiter for the frontend to parse
+      const diffData = JSON.stringify({ filePath, originalContent, newContent });
+      return `Write to: ${filePath}\n<!--TIDE_DIFF:${diffData}-->`;
+    }
+    case "edit": {
+      const filePath = typeof args.path === "string" ? args.path : "unknown";
+      const oldStr = typeof args.old_string === "string" ? args.old_string : "";
+      const newStr = typeof args.new_string === "string" ? args.new_string : "";
+      // Read existing file content for diff preview
+      let originalContent = "";
+      try {
+        const absPath = path.isAbsolute(filePath) ? filePath : path.join(workspaceRoot, filePath);
+        if (fs.existsSync(absPath)) {
+          originalContent = fs.readFileSync(absPath, "utf-8");
+        }
+      } catch { /* ignore */ }
+      // Compute new content by applying the edit
+      const newContent = originalContent.includes(oldStr)
+        ? originalContent.replace(oldStr, newStr)
+        : originalContent;
+      const diffData = JSON.stringify({ filePath, originalContent, newContent });
+      return `Edit: ${filePath}\n<!--TIDE_DIFF:${diffData}-->`;
+    }
     case "bash":
       return `Run command: ${args.command || "unknown"}`;
     default:
@@ -134,7 +168,7 @@ export default function tideSafety(pi: ExtensionAPI) {
       return; // Allow tool call to proceed
     }
 
-    const description = formatToolCallDescription(toolName, args);
+    const description = formatToolCallDescription(toolName, args, ctx.cwd);
     const approved = await ctx.ui.confirm(
       `[${level.toUpperCase()}] Approve tool call?`,
       description,

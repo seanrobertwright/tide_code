@@ -1,0 +1,75 @@
+{
+  "project": "Tide IDE — Agentic Coding Environment",
+  "phase": "6b",
+  "name": "Workspace Fixes + Permission System",
+  "description": "Foundational fixes discovered through real usage: Pi CWD follows workspace changes, file tree auto-refreshes after agent writes, persistent permission cache with yolo mode.",
+  "created": "2026-03-05",
+  "notes": [
+    "Phase 6 (Wire Pi Features) is complete — these are gaps found through actual use.",
+    "Permission system follows the same .tide/ persistence pattern as tags.",
+    "Yolo mode auto-approves all tool calls — equivalent to Pi's native yolo mode.",
+    "File explorer auto-refresh triggers on write/edit/create/delete tool completions.",
+    "Must complete before Phase 7 (Router + Task Classification)."
+  ],
+
+  "tasks": [
+    {
+      "id": "TIDE-086",
+      "title": "Fix Pi CWD on Workspace Change",
+      "description": "When user opens a folder via Open Folder, the Pi process keeps running with its original CWD (often Desktop). Fix: after openWorkspace() updates the stored root, call restartPi() to respawn Pi with the correct CWD. The restart_pi command already reads workspace_root from AppState.",
+      "files": [
+        "src/App.tsx"
+      ],
+      "status": "completed",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-087",
+      "title": "File Explorer Auto-Refresh on Agent Writes",
+      "description": "File tree doesn't update when Pi creates/modifies/deletes files. Listen for tool_execution_end events where tool name matches write/edit/create/delete. Trigger workspace store refreshFileTree() which re-calls fsListDir and updates the tree.",
+      "files": [
+        "src/stores/stream.ts",
+        "src/stores/workspace.ts"
+      ],
+      "status": "completed",
+      "priority": "medium"
+    },
+    {
+      "id": "TIDE-088",
+      "title": "Persistent Permission Cache",
+      "description": "New permissionStore.ts with Permission interface (id, toolName, scope, pattern, decision). Persisted to .tide/permissions.json via Rust IPC (permissions_load/permissions_save). ApprovalDialog gets 'Remember' dropdown: remember per-tool or per-file. approvalStore checks cache before showing dialog — auto-responds if matched.",
+      "files": [
+        "src/stores/permissionStore.ts",
+        "src/stores/approvalStore.ts",
+        "src/components/Approval/ApprovalDialog.tsx",
+        "src/lib/ipc.ts",
+        "src-tauri/src/lib.rs"
+      ],
+      "status": "completed",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-089",
+      "title": "Yolo Mode Toggle",
+      "description": "Add yoloMode boolean to permissionStore, persisted in .tide/permissions.json. When enabled, all confirm requests auto-approved without showing dialog. Safety settings panel (SafetyPlaceholder.tsx) replaced with real UI: yolo toggle, saved permissions list with remove/clear actions.",
+      "files": [
+        "src/stores/permissionStore.ts",
+        "src/components/Settings/SafetyPlaceholder.tsx"
+      ],
+      "status": "completed",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-090",
+      "title": "Keyboard Shortcuts Panel in Settings",
+      "description": "New 'Shortcuts' tab in Settings modal listing all keyboard shortcuts grouped by category (General, Editor, Agent Panel, Dialogs). Read-only reference panel so users can discover available shortcuts.",
+      "files": [
+        "src/components/Settings/KeyboardShortcuts.tsx",
+        "src/components/Settings/SettingsModal.tsx",
+        "src/stores/settingsStore.ts"
+      ],
+      "status": "completed",
+      "priority": "low"
+    }
+  ]
+}

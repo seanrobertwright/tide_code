@@ -1,8 +1,6 @@
 import { create } from "zustand";
 import type { RegionTag, CreateRegionTag } from "@tide/shared";
-
-// TODO: Rewire to Pi's tide_tags tool in Phase 5.
-// Region tags will be stored as JSON in .tide/tags/ and managed by the tide-project.ts extension.
+import { tagsLoad, tagsSave } from "../lib/ipc";
 
 interface RegionTagState {
   tags: Map<string, RegionTag>;
@@ -19,22 +17,50 @@ interface RegionTagState {
   getTagsForFile: (filePath: string) => RegionTag[];
 }
 
+/** Rebuild tagsByFile index from tags map */
+function buildIndex(tags: Map<string, RegionTag>): Map<string, Set<string>> {
+  const index = new Map<string, Set<string>>();
+  for (const [id, tag] of tags) {
+    const set = index.get(tag.filePath) ?? new Set();
+    set.add(id);
+    index.set(tag.filePath, set);
+  }
+  return index;
+}
+
+/** Persist current tags to disk via Tauri */
+async function persistTags(tags: Map<string, RegionTag>) {
+  try {
+    await tagsSave(Array.from(tags.values()));
+  } catch (err) {
+    console.error("[regionTagStore] Failed to persist tags:", err);
+  }
+}
+
 export const useRegionTagStore = create<RegionTagState>((set, get) => ({
   tags: new Map(),
   tagsByFile: new Map(),
   staleTags: new Set(),
 
   loadTagsForFile: async (_filePath: string) => {
-    // No-op: Region tags backend not yet connected to Pi. See Phase 5.
+    // loadAllTags loads everything; filter is done by getTagsForFile
+    await get().loadAllTags();
   },
 
   loadAllTags: async () => {
-    // No-op: Region tags backend not yet connected to Pi. See Phase 5.
+    try {
+      const raw = (await tagsLoad()) as RegionTag[];
+      const tags = new Map<string, RegionTag>();
+      for (const t of raw) {
+        tags.set(t.id, t);
+      }
+      set({ tags, tagsByFile: buildIndex(tags) });
+    } catch (err) {
+      console.error("[regionTagStore] Failed to load tags:", err);
+    }
   },
 
   createTag: async (input: CreateRegionTag) => {
-    console.warn("[regionTagStore] createTag not yet connected to Pi backend");
-    // Return a stub tag so callers don't crash
     const tag: RegionTag = {
       ...input,
       id: crypto.randomUUID(),
@@ -42,43 +68,29 @@ export const useRegionTagStore = create<RegionTagState>((set, get) => ({
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    set((state) => {
-      const tags = new Map(state.tags);
-      tags.set(tag.id, tag);
-      const tagsByFile = new Map(state.tagsByFile);
-      const fileSet = new Set(tagsByFile.get(tag.filePath) ?? []);
-      fileSet.add(tag.id);
-      tagsByFile.set(tag.filePath, fileSet);
-      return { tags, tagsByFile };
-    });
+    const tags = new Map(get().tags);
+    tags.set(tag.id, tag);
+    set({ tags, tagsByFile: buildIndex(tags) });
+    await persistTags(tags);
     return tag;
   },
 
   deleteTag: async (id: string) => {
-    const tag = get().tags.get(id);
-    set((state) => {
-      const tags = new Map(state.tags);
-      tags.delete(id);
-      const tagsByFile = new Map(state.tagsByFile);
-      if (tag) {
-        const fileSet = new Set(tagsByFile.get(tag.filePath) ?? []);
-        fileSet.delete(id);
-        tagsByFile.set(tag.filePath, fileSet);
-      }
-      const staleTags = new Set(state.staleTags);
-      staleTags.delete(id);
-      return { tags, tagsByFile, staleTags };
-    });
+    const tags = new Map(get().tags);
+    tags.delete(id);
+    const staleTags = new Set(get().staleTags);
+    staleTags.delete(id);
+    set({ tags, tagsByFile: buildIndex(tags), staleTags });
+    await persistTags(tags);
   },
 
   togglePin: async (id: string) => {
     const tag = get().tags.get(id);
     if (!tag) return;
-    set((state) => {
-      const tags = new Map(state.tags);
-      tags.set(id, { ...tag, pinned: !tag.pinned, updatedAt: new Date().toISOString() });
-      return { tags };
-    });
+    const tags = new Map(get().tags);
+    tags.set(id, { ...tag, pinned: !tag.pinned, updatedAt: new Date().toISOString() });
+    set({ tags });
+    await persistTags(tags);
   },
 
   markStale: (id: string) =>

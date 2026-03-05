@@ -21,7 +21,7 @@
         "src/stores/stream.ts",
         "src/components/StatusBar/ContextDial.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "high"
     },
     {
@@ -33,7 +33,7 @@
         "src/stores/logStore.ts",
         "src/components/AgentPanel/LogsTab.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "high"
     },
     {
@@ -44,7 +44,7 @@
         "src/stores/regionTagStore.ts",
         "apps/desktop/pi-extensions/tide-project.ts"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     },
     {
@@ -57,7 +57,7 @@
         "src/lib/ipc.ts",
         "src/App.tsx"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     },
     {
@@ -68,7 +68,7 @@
         "apps/desktop/pi-extensions/tide-safety.ts",
         "src/stores/approvalStore.ts"
       ],
-      "status": "pending",
+      "status": "completed",
       "priority": "medium"
     }
   ]

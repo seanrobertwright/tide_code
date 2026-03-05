@@ -1,72 +1,134 @@
 {
   "project": "Tide IDE — Agentic Coding Environment",
   "phase": 8,
-  "name": "Multi-Agent Orchestration",
-  "description": "Tide's signature feature. Rust orchestration state machine manages multiple sequential Pi prompts — routing, planning, building step-by-step, and reviewing. Each phase uses a different system prompt and model. The user sees a pipeline progress UI and can approve the final changeset.",
-  "created": "2026-03-04",
+  "name": "Native Code Index (tree-sitter)",
+  "description": "Integrate a native Rust tree-sitter code indexer into the Tide backend. Parses workspace files into symbols (functions, classes, methods), stores in SQLite, auto-indexes on workspace open with file watcher for incremental updates, and exposes symbol retrieval tools to the Pi agent for ~99% token reduction when navigating codebases. Inspired by jCodeMunch MCP.",
+  "created": "2026-03-05",
+  "completed": "2026-03-05",
   "notes": [
-    "Orchestration state machine lives in Rust (manages Pi process, spawns sequential prompts).",
-    "Each orchestration phase sends a different system prompt to Pi via send_prompt.",
-    "Builder phase executes one Pi prompt per plan step — marks steps done in .tide/features/ plan file.",
-    "Reviewer phase runs build/test commands (from TIDE.md) and reports issues.",
-    "User can bypass orchestration and send direct prompts (orchestration is opt-in).",
-    "Phase 7 (Router + Planner) must be complete."
+    "Uses tree-sitter Rust crate directly — no Python/MCP wrapping.",
+    "Index stored in .tide/index.db (separate from tide.db to avoid lock contention).",
+    "Initial languages: TypeScript, TSX, JavaScript, JSX, Rust, Python, Go.",
+    "Auto-indexes on workspace open via background tokio task.",
+    "File watcher (notify crate) provides incremental updates on save.",
+    "Pi extension (tide-index.ts) exposes 5 tools for symbol retrieval via better-sqlite3.",
+    "Stable symbol IDs follow jCodeMunch format: {rel_path}::{qualified_name}#{kind}.",
+    "FTS5 virtual table enables fast fuzzy symbol search.",
+    "ignore crate auto-respects .gitignore for file walking.",
+    "Inspired by jCodeMunch MCP (github.com/jgravelle/jcodemunch-mcp)."
   ],
 
   "tasks": [
     {
       "id": "TIDE-070",
-      "title": "Build Orchestration State Machine (Rust)",
-      "description": "Core Rust module implementing the orchestration loop. States: Idle → Routing → Planning → Building → Reviewing → Complete. Each state transition triggers a specific Pi prompt with tailored system prompt. OrchestrationState stored in AppState. New Tauri command: orchestrate(prompt) that starts the state machine instead of sending a direct prompt.",
-      "files": [
-        "src-tauri/src/orchestrator.rs",
-        "src-tauri/src/lib.rs"
-      ],
-      "status": "pending",
+      "title": "Add tree-sitter + SQLite crates to Cargo.toml",
+      "description": "Add dependencies: tree-sitter, tree-sitter-typescript, tree-sitter-rust, tree-sitter-python, tree-sitter-go, tree-sitter-javascript, rusqlite (bundled), notify, xxhash-rust, ignore.",
+      "files": ["apps/desktop/src-tauri/Cargo.toml"],
+      "status": "done",
       "priority": "high"
     },
     {
       "id": "TIDE-071",
-      "title": "Implement Builder Phase: Step-by-Step Execution",
-      "description": "For planned tasks, the orchestrator sends one Pi prompt per plan step. Each prompt includes: the original task, the full plan JSON, which step to execute, and context from previous steps (files changed). On step completion, marks the step done in the .tide/features/<slug>.json plan file. Emits step_complete events to UI.",
+      "title": "Create indexer module with SQLite schema",
+      "description": "New module apps/desktop/src-tauri/src/indexer/ with mod.rs and schema.rs. Creates repos, files, symbols tables plus symbols_fts FTS5 virtual table in .tide/index.db. Triggers keep FTS in sync. WAL mode for concurrent reads.",
       "files": [
-        "src-tauri/src/orchestrator.rs"
+        "apps/desktop/src-tauri/src/indexer/mod.rs",
+        "apps/desktop/src-tauri/src/indexer/schema.rs",
+        "apps/desktop/src-tauri/src/lib.rs"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "high"
     },
     {
       "id": "TIDE-072",
-      "title": "Implement Reviewer Phase",
-      "description": "After the builder completes all steps, the orchestrator sends a review prompt. The reviewer system prompt instructs Pi to: (a) verify all plan steps were addressed, (b) run build command if configured in TIDE.md, (c) run test commands from TIDE.md, (d) report issues or sign off. Review results emitted as events to the UI.",
+      "title": "Implement tree-sitter parsers for 5 languages",
+      "description": "parser.rs maps file extensions to tree-sitter Languages. symbols.rs extracts symbols per language: TS/JS (functions, classes, methods, interfaces, types, enums, arrow functions, constants), Rust (functions, structs, enums, traits, impls, consts, types, modules), Python (functions, classes, methods with docstrings), Go (functions, methods, types, constants).",
       "files": [
-        "src-tauri/src/orchestrator.rs"
+        "apps/desktop/src-tauri/src/indexer/parser.rs",
+        "apps/desktop/src-tauri/src/indexer/symbols.rs"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "high"
     },
     {
       "id": "TIDE-073",
-      "title": "Build Orchestration Progress UI",
-      "description": "Visual pipeline progress indicator: Route → Plan → Build (step 2/5) → Review → Complete. Each phase shows its status (pending/active/done). Animated transitions between phases. Click a phase to see its details and output. orchestrationStore.ts tracks current state and emits updates from Pi events.",
-      "files": [
-        "src/components/Orchestration/PipelineProgress.tsx",
-        "src/stores/orchestrationStore.ts",
-        "src/App.tsx"
-      ],
-      "status": "pending",
-      "priority": "medium"
+      "title": "Build workspace indexing pipeline",
+      "description": "Uses ignore crate to walk workspace (auto-respects .gitignore). xxh3 hash per file for incremental updates — only re-parses changed files. Emits index_progress Tauri events. Runs as background tokio::spawn task.",
+      "files": ["apps/desktop/src-tauri/src/indexer/mod.rs"],
+      "status": "done",
+      "priority": "high"
     },
     {
       "id": "TIDE-074",
-      "title": "Build Multi-File Change Viewer",
-      "description": "After an orchestrated task completes, show a summary of all files modified across all build steps. List with diff counts per file (lines added/removed). Click any file to see its full diff in DiffPreview. Approve/reject the entire changeset. ChangesetViewer.tsx component.",
+      "title": "Implement file watcher for incremental updates",
+      "description": "notify::RecommendedWatcher on workspace root. Debounced event processing (300ms). Re-indexes on file change/create, removes on delete. Filters to supported extensions only.",
       "files": [
-        "src/components/Orchestration/ChangesetViewer.tsx",
-        "src/App.tsx"
+        "apps/desktop/src-tauri/src/indexer/watcher.rs",
+        "apps/desktop/src-tauri/src/indexer/mod.rs"
       ],
-      "status": "pending",
+      "status": "done",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-075",
+      "title": "Implement query functions for symbol retrieval",
+      "description": "query.rs with: get_file_tree, get_file_outline (hierarchical), get_symbol (reads source from disk for body), search_symbols (FTS5), get_repo_outline.",
+      "files": ["apps/desktop/src-tauri/src/indexer/query.rs"],
+      "status": "done",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-076",
+      "title": "Register Tauri IPC commands for indexer",
+      "description": "Tauri commands: index_workspace_cmd, index_file_tree, index_file_outline, index_get_symbol, index_search_symbols, index_repo_outline, index_status, index_invalidate. All registered in lib.rs invoke_handler. open_workspace auto-triggers background indexing.",
+      "files": [
+        "apps/desktop/src-tauri/src/indexer/mod.rs",
+        "apps/desktop/src-tauri/src/lib.rs"
+      ],
+      "status": "done",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-077",
+      "title": "Create tide-index.ts Pi extension",
+      "description": "Pi extension with 5 tools: tide_index_file_tree, tide_index_file_outline, tide_index_get_symbol, tide_index_search, tide_index_repo_outline. Reads from .tide/index.db via better-sqlite3. before_agent_start hook injects system prompt about available tools when index is ready.",
+      "files": [
+        "apps/desktop/pi-extensions/tide-index.ts",
+        "apps/desktop/src-tauri/src/lib.rs"
+      ],
+      "status": "done",
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-078",
+      "title": "Add frontend IPC bindings and indexStore",
+      "description": "IPC wrappers in lib/ipc.ts for all index commands. Zustand indexStore tracking indexed/indexing/fileCount/symbolCount/progress. App.tsx listens to index_progress and index_complete Tauri events.",
+      "files": [
+        "apps/desktop/src/lib/ipc.ts",
+        "apps/desktop/src/stores/indexStore.ts",
+        "apps/desktop/src/App.tsx"
+      ],
+      "status": "done",
       "priority": "medium"
+    },
+    {
+      "id": "TIDE-079",
+      "title": "Context Dial index indicator",
+      "description": "Enhance ContextDial.tsx to show 'IDX' badge when indexed, tooltip with file/symbol counts. CostIndicator popover shows estimated token savings.",
+      "files": [
+        "apps/desktop/src/components/StatusBar/ContextDial.tsx",
+        "apps/desktop/src/components/StatusBar/CostIndicator.tsx"
+      ],
+      "status": "done",
+      "priority": "low"
+    },
+    {
+      "id": "TIDE-080",
+      "title": "Router enhancement with index awareness",
+      "description": "In tide-router.ts, use index stats to refine task classification: large workspaces with cross-codebase prompts bump to complex tier. Small workspaces (<10 files) have reduced complexity thresholds.",
+      "files": ["apps/desktop/pi-extensions/tide-router.ts"],
+      "status": "done",
+      "priority": "low"
     }
   ]
 }

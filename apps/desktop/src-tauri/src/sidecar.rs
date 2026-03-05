@@ -40,7 +40,7 @@ pub async fn start_pi(
 
     let mut cmd = Command::new(&pi_path);
     cmd.arg("--mode").arg("rpc");
-    cmd.arg("--no-session"); // Tide manages its own session concept
+    cmd.arg("-c"); // Continue last session (restores chat history)
 
     for ext in extensions {
         cmd.arg("-e").arg(ext);

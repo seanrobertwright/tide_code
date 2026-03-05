@@ -24,8 +24,8 @@ interface LogState {
   setFilterTool: (tool: string) => void;
   setFilterStatus: (status: string) => void;
   fetchLogs: () => Promise<void>;
-  addToolStart: (id: string, toolName: string) => void;
-  completeToolLog: (id: string) => void;
+  addToolStart: (id: string, toolName: string, extra?: { argsJson?: string }) => void;
+  completeToolLog: (id: string, extra?: { resultJson?: string; error?: string }) => void;
 }
 
 export const useLogStore = create<LogState>((set) => ({
@@ -40,7 +40,7 @@ export const useLogStore = create<LogState>((set) => ({
   // Logs are populated via addToolStart/completeToolLog from Pi events.
   fetchLogs: async () => {},
 
-  addToolStart: (id: string, toolName: string) => {
+  addToolStart: (id: string, toolName: string, extra?: { argsJson?: string }) => {
     set((state) => ({
       logs: [
         {
@@ -48,7 +48,7 @@ export const useLogStore = create<LogState>((set) => ({
           requestId: id,
           sessionId: null,
           toolName,
-          argsJson: "{}",
+          argsJson: extra?.argsJson ?? "{}",
           safetyLevel: "read",
           approvalRequired: false,
           approvalResult: null,
@@ -64,17 +64,19 @@ export const useLogStore = create<LogState>((set) => ({
     }));
   },
 
-  completeToolLog: (id: string) => {
+  completeToolLog: (id: string, extra?: { resultJson?: string; error?: string }) => {
     set((state) => ({
       logs: state.logs.map((log) =>
         log.id === id
           ? {
               ...log,
-              status: "success" as const,
+              status: (extra?.error ? "error" : "success") as "error" | "success",
               completedAt: new Date().toISOString(),
               durationMs: Math.round(
                 new Date().getTime() - new Date(log.startedAt).getTime(),
               ),
+              resultJson: extra?.resultJson ?? null,
+              error: extra?.error ?? null,
             }
           : log,
       ),

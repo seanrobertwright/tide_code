@@ -1,76 +1,73 @@
 {
   "project": "Tide IDE — Agentic Coding Environment",
   "phase": 9,
-  "name": "Skills + Extensibility",
-  "description": "Build the skills system — focused, composable actions invokable from the Command Palette. Pi extension-based skills for test discovery, code explanation, refactoring, and repo map generation. Skill management UI for viewing, enabling, and trusting skills.",
+  "name": "Multi-Agent Orchestration",
+  "description": "Tide's signature feature. Rust orchestration state machine manages multiple sequential Pi prompts — routing, planning, building step-by-step, and reviewing. Each phase uses a different system prompt and model. The user sees a pipeline progress UI and can approve the final changeset.",
   "created": "2026-03-04",
   "notes": [
-    "Skills are Pi extensions in .tide/skills/ (workspace-local) or pi-extensions/skills/ (built-in).",
-    "Each skill registers as a command in the Command Palette.",
-    "Skills can parallel with Phase 7/8 development.",
-    "Workspace-local skills require explicit trust before activation.",
-    "Repo map generator is critical for smart context injection in Phase 10."
+    "Orchestration state machine lives in Rust (manages Pi process, spawns sequential prompts).",
+    "Each orchestration phase sends a different system prompt to Pi via send_prompt.",
+    "Builder phase executes one Pi prompt per plan step — marks steps done in .tide/features/ plan file.",
+    "Reviewer phase runs build/test commands (from TIDE.md) and reports issues.",
+    "User can bypass orchestration and send direct prompts (orchestration is opt-in).",
+    "Phase 7 (Router + Planner) must be complete.",
+    "Phase 8 (Code Index) provides token-efficient symbol retrieval for builder and reviewer steps."
   ],
 
   "tasks": [
     {
-      "id": "TIDE-075",
-      "title": "Build Skill Registration Framework",
-      "description": "Define Skill interface: { id, name, description, category, permissions, execute }. Skills register into the command store and are available from Command Palette. Rust skills.rs module scans .tide/skills/ and pi-extensions/skills/ directories. Skills loaded as Pi extensions. New Tauri command: list_skills.",
+      "id": "TIDE-081",
+      "title": "Build Orchestration State Machine (Rust)",
+      "description": "Core Rust module implementing the orchestration loop. States: Idle → Routing → Planning → Building → Reviewing → Complete. Each state transition triggers a specific Pi prompt with tailored system prompt. OrchestrationState stored in AppState. New Tauri command: orchestrate(prompt) that starts the state machine instead of sending a direct prompt.",
       "files": [
-        "src/lib/skills.ts",
-        "src-tauri/src/skills.rs",
-        "src-tauri/src/lib.rs",
-        "apps/desktop/pi-extensions/skills/"
+        "src-tauri/src/orchestrator.rs",
+        "src-tauri/src/lib.rs"
       ],
       "status": "pending",
       "priority": "high"
     },
     {
-      "id": "TIDE-076",
-      "title": "Create Test Discovery Skill",
-      "description": "Pi extension skill that scans the workspace for test frameworks (jest, vitest, pytest, cargo test, go test, etc.) by looking at package.json, Cargo.toml, pyproject.toml, go.mod. Presents findings via Pi response. Confirmed test commands written to TIDE.md test_commands section. Available as 'Tide: Discover Tests' in Command Palette.",
-      "files": ["apps/desktop/pi-extensions/skills/test-discovery.ts"],
-      "status": "pending",
-      "priority": "medium"
-    },
-    {
-      "id": "TIDE-077",
-      "title": "Create Explain Code Skill",
-      "description": "Select code in Monaco editor, invoke from Command Palette ('Tide: Explain Selection') or editor context menu. Sends selected region (file path + line range + content) to Pi with an explanation system prompt. Streams response in the AgentPanel. Optionally saves explanation as a region tag note.",
+      "id": "TIDE-082",
+      "title": "Implement Builder Phase: Step-by-Step Execution",
+      "description": "For planned tasks, the orchestrator sends one Pi prompt per plan step. Each prompt includes: the original task, the full plan JSON, which step to execute, and context from previous steps (files changed). On step completion, marks the step done in the .tide/features/<slug>.json plan file. Emits step_complete events to UI.",
       "files": [
-        "apps/desktop/pi-extensions/skills/explain-code.ts",
-        "src/components/Editor/MonacoEditor.tsx"
-      ],
-      "status": "pending",
-      "priority": "medium"
-    },
-    {
-      "id": "TIDE-078",
-      "title": "Create Refactor Skill",
-      "description": "Select code, invoke refactoring operations from Command Palette: Extract Function, Rename Symbol, Inline Variable, Convert to Interface. Each operation sends a focused prompt to Pi with the selected code, surrounding file context, and specific refactoring instructions. Uses Pi's edit tool for modifications.",
-      "files": ["apps/desktop/pi-extensions/skills/refactor.ts"],
-      "status": "pending",
-      "priority": "medium"
-    },
-    {
-      "id": "TIDE-079",
-      "title": "Build Repo Map Generator",
-      "description": "Skill that generates a project structure summary: file tree + key exports/classes/functions per file. Stores result in .tide/repo-map.md. Injected into agent context by tide-project.ts. Regenerated on workspace open or via Command Palette ('Tide: Regenerate Repo Map'). Uses a fast model for analysis to minimize cost.",
-      "files": [
-        "apps/desktop/pi-extensions/skills/repo-map.ts",
-        "apps/desktop/pi-extensions/tide-project.ts"
+        "src-tauri/src/orchestrator.rs"
       ],
       "status": "pending",
       "priority": "high"
     },
     {
-      "id": "TIDE-080",
-      "title": "Build Skill Management UI",
-      "description": "Settings panel tab showing installed skills: name, description, source (built-in vs workspace-local), enabled/disabled toggle. Workspace-local skills (.tide/skills/) show a 'Trust' prompt before activation. Permissions listed per skill.",
-      "files": ["src/components/Settings/SkillSettings.tsx"],
+      "id": "TIDE-083",
+      "title": "Implement Reviewer Phase",
+      "description": "After the builder completes all steps, the orchestrator sends a review prompt. The reviewer system prompt instructs Pi to: (a) verify all plan steps were addressed, (b) run build command if configured in TIDE.md, (c) run test commands from TIDE.md, (d) report issues or sign off. Review results emitted as events to the UI.",
+      "files": [
+        "src-tauri/src/orchestrator.rs"
+      ],
       "status": "pending",
-      "priority": "low"
+      "priority": "high"
+    },
+    {
+      "id": "TIDE-084",
+      "title": "Build Orchestration Progress UI",
+      "description": "Visual pipeline progress indicator: Route → Plan → Build (step 2/5) → Review → Complete. Each phase shows its status (pending/active/done). Animated transitions between phases. Click a phase to see its details and output. orchestrationStore.ts tracks current state and emits updates from Pi events.",
+      "files": [
+        "src/components/Orchestration/PipelineProgress.tsx",
+        "src/stores/orchestrationStore.ts",
+        "src/App.tsx"
+      ],
+      "status": "pending",
+      "priority": "medium"
+    },
+    {
+      "id": "TIDE-085",
+      "title": "Build Multi-File Change Viewer",
+      "description": "After an orchestrated task completes, show a summary of all files modified across all build steps. List with diff counts per file (lines added/removed). Click any file to see its full diff in DiffPreview. Approve/reject the entire changeset. ChangesetViewer.tsx component.",
+      "files": [
+        "src/components/Orchestration/ChangesetViewer.tsx",
+        "src/App.tsx"
+      ],
+      "status": "pending",
+      "priority": "medium"
     }
   ]
 }

@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { fsListDir } from "../lib/ipc";
 
 export interface FsEntry {
   name: string;
@@ -31,6 +32,7 @@ interface WorkspaceState {
   closeTab: (path: string) => void;
   setActiveTab: (path: string | null) => void;
   updateTabContent: (path: string, content: string) => void;
+  refreshFileTree: () => void;
 }
 
 function insertChildren(entries: FsEntry[], dirPath: string, children: FsEntry[]): FsEntry[] {
@@ -103,4 +105,47 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
         t.path === path ? { ...t, content, isDirty: true } : t,
       ),
     })),
+
+  refreshFileTree: () => {
+    const { rootPath, expandedDirs } = get();
+    if (!rootPath) return;
+
+    const mapEntries = (raw: any[]): FsEntry[] =>
+      raw.map((e) => ({
+        name: e.name,
+        path: e.path,
+        isDir: e.type === "directory",
+        size: e.size,
+      }));
+
+    // Refresh root
+    fsListDir(rootPath).then(async (entries) => {
+      let tree = mapEntries(entries as any[]);
+
+      // Re-fetch children of expanded directories
+      const refreshChildren = async (items: FsEntry[]): Promise<FsEntry[]> => {
+        return Promise.all(
+          items.map(async (item) => {
+            if (item.isDir && expandedDirs.has(item.path)) {
+              try {
+                const childEntries = await fsListDir(item.path);
+                let children = mapEntries(childEntries as any[]);
+                // Recursively refresh nested expanded dirs
+                children = await refreshChildren(children);
+                return { ...item, children };
+              } catch {
+                return item;
+              }
+            }
+            return item;
+          }),
+        );
+      };
+
+      tree = await refreshChildren(tree);
+      set({ fileTree: tree });
+    }).catch((err) => {
+      console.error("[Tide] Failed to refresh file tree:", err);
+    });
+  },
 }));

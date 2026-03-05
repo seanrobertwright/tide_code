@@ -16,8 +16,19 @@ tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 uuid = { version = "1", features = ["v4"] }
-security-framework = "3"
 git2 = "0.19"
+
+# Phase 8: Native Code Index (tree-sitter)
+tree-sitter = "0.24"
+tree-sitter-typescript = "0.23"
+tree-sitter-javascript = "0.23"
+tree-sitter-rust = "0.23"
+tree-sitter-python = "0.23"
+tree-sitter-go = "0.23"
+rusqlite = { version = "0.32", features = ["bundled"] }
+notify = { version = "7", features = ["macos_kqueue"] }
+xxhash-rust = { version = "0.8", features = ["xxh3"] }
+ignore = "0.4"
 
 [features]
 default = ["custom-protocol"]

@@ -3,11 +3,13 @@ import { useSettingsStore, type SettingsSection } from "../../stores/settingsSto
 import { ProviderSettings } from "./ProviderSettings";
 import { SafetyPlaceholder } from "./SafetyPlaceholder";
 import { SkillsPlaceholder } from "./SkillsPlaceholder";
+import { KeyboardShortcuts } from "./KeyboardShortcuts";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "providers", label: "Provider Keys" },
   { id: "safety", label: "Safety" },
   { id: "skills", label: "Skills" },
+  { id: "shortcuts", label: "Shortcuts" },
 ];
 
 export function SettingsModal() {
@@ -52,6 +54,7 @@ export function SettingsModal() {
           {activeSection === "providers" && <ProviderSettings />}
           {activeSection === "safety" && <SafetyPlaceholder />}
           {activeSection === "skills" && <SkillsPlaceholder />}
+          {activeSection === "shortcuts" && <KeyboardShortcuts />}
         </div>
 
         {/* Close button */}

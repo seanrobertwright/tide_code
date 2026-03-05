@@ -69,6 +69,11 @@ export async function onPiEvent(handler: (event: PiEvent) => void): Promise<Unli
   });
 }
 
+/** Listen for Pi ready event (emitted after Pi process connects). */
+export async function onPiReady(handler: () => void): Promise<UnlistenFn> {
+  return listen("pi_ready", () => handler());
+}
+
 /** Set up a listener specifically for Pi UI requests (approvals). */
 export async function onPiUiRequest(handler: (event: PiUiRequest) => void): Promise<UnlistenFn> {
   return listen<PiUiRequest>("pi_ui_request", (event) => {

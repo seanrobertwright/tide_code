@@ -5,8 +5,8 @@ import { useWorkspaceStore, type FsEntry } from "./stores/workspace";
 import { useUiStore } from "./stores/ui";
 import { useStreamStore } from "./stores/stream";
 import { useCommandStore } from "./stores/commandStore";
-import { getPiStatus, openWorkspace } from "./lib/ipc";
-import { onPiEvent } from "./lib/pi-events";
+import { getPiStatus, getPiState, getAvailableModels, getMessages, openWorkspace, restartPi } from "./lib/ipc";
+import { onPiEvent, onPiReady } from "./lib/pi-events";
 import { SplitPane } from "./components/Layout/SplitPane";
 import { GlobalLoader } from "./components/GlobalLoader";
 import { FileTree } from "./components/FileTree/FileTree";
@@ -15,12 +15,18 @@ import { MonacoEditor } from "./components/Editor/MonacoEditor";
 import { AgentPanel } from "./components/AgentPanel/AgentPanel";
 import { ContextDial } from "./components/StatusBar/ContextDial";
 import { GitStatus } from "./components/StatusBar/GitStatus";
+import { ModelPicker } from "./components/StatusBar/ModelPicker";
+import { ThinkingLevelPicker } from "./components/StatusBar/ThinkingLevelPicker";
+import { CostIndicator } from "./components/StatusBar/CostIndicator";
 import { ContextInspector } from "./components/ContextInspector/ContextInspector";
 import { ApprovalDialog } from "./components/Approval/ApprovalDialog";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { SettingsModal } from "./components/Settings/SettingsModal";
 import { useSettingsStore } from "./stores/settingsStore";
 import { initApprovalListener } from "./stores/approvalStore";
+import { usePermissionStore } from "./stores/permissionStore";
+import { useIndexStore } from "./stores/indexStore";
+import { listen } from "@tauri-apps/api/event";
 import "./styles/global.css";
 
 interface RawFsEntry {
@@ -49,36 +55,106 @@ export function App() {
 
   // Initialize listeners on mount
   useEffect(() => {
+    let cancelled = false;
     initApprovalListener();
+    usePermissionStore.getState().load();
 
     // Subscribe to all Pi events and forward to stream store
-    const cleanup = onPiEvent((event) => {
-      handlePiEvent(event);
+    const eventCleanup = onPiEvent((event) => {
+      if (!cancelled) handlePiEvent(event);
     });
 
+    // Also listen for pi_ready event (backup for status polling)
+    const readyCleanup = onPiReady(() => {
+      if (cancelled) return;
+      console.log("[Tide] pi_ready event — requesting state + models + history");
+      getPiState().catch(() => {});
+      getAvailableModels().catch(() => {});
+      getMessages().catch(() => {});
+    });
+
+    // Listen for code index progress events
+    const indexProgressCleanup = listen<{ done: number; total: number; currentFile: string }>(
+      "index_progress",
+      (event) => {
+        if (!cancelled) {
+          useIndexStore.getState().updateProgress(
+            event.payload.done,
+            event.payload.total,
+            event.payload.currentFile,
+          );
+        }
+      },
+    );
+
+    // Listen for index completion
+    const indexCompleteCleanup = listen<{ indexed: boolean; fileCount: number; symbolCount: number; lastIndexedAt: string | null; indexingInProgress: boolean }>(
+      "index_complete",
+      (event) => {
+        if (!cancelled) {
+          useIndexStore.getState().updateFromStats(event.payload);
+        }
+      },
+    );
+
     return () => {
-      cleanup.then((unlisten) => unlisten());
+      cancelled = true;
+      eventCleanup.then((unlisten) => unlisten());
+      readyCleanup.then((unlisten) => unlisten());
+      indexProgressCleanup.then((unlisten) => unlisten());
+      indexCompleteCleanup.then((unlisten) => unlisten());
     };
   }, [handlePiEvent]);
 
-  // Poll Pi status
+  // Poll Pi status — when first connected, fetch models + state
   useEffect(() => {
     let cancelled = false;
+    let wasConnected = false;
     const check = async () => {
       try {
         const result = await getPiStatus();
-        if (!cancelled) setStatus(result === "connected" ? "connected" : "disconnected");
+        const connected = result === "connected";
+        if (!cancelled) setStatus(connected ? "connected" : "disconnected");
+
+        // On first connection (or reconnection), request models + state
+        if (connected && !wasConnected) {
+          wasConnected = true;
+          console.log("[Tide] Pi connected — requesting state + models + history");
+          getPiState().catch(() => {});
+          getAvailableModels().catch(() => {});
+          // Restore chat history from Pi's current session (Pi starts with -c)
+          getMessages().catch(() => {});
+          // Retry in case model registry is still initializing
+          setTimeout(() => {
+            if (useStreamStore.getState().availableModels.length === 0) {
+              console.log("[Tide] Retrying getAvailableModels (2s)");
+              getAvailableModels().catch(() => {});
+            }
+          }, 2000);
+        }
+        if (!connected) wasConnected = false;
       } catch {
         if (!cancelled) setStatus("disconnected");
+        wasConnected = false;
       }
     };
-    const interval = setInterval(check, 2000);
+    const interval = setInterval(check, 5000);
     check();
     return () => {
       cancelled = true;
       clearInterval(interval);
     };
   }, [setStatus]);
+
+  // Refresh file tree when window regains focus (catches external file changes)
+  useEffect(() => {
+    const handleFocus = () => {
+      const root = useWorkspaceStore.getState().rootPath;
+      if (root) useWorkspaceStore.getState().refreshFileTree();
+    };
+    window.addEventListener("focus", handleFocus);
+    return () => window.removeEventListener("focus", handleFocus);
+  }, []);
 
   // Register global keyboard shortcuts
   useEffect(() => {
@@ -147,6 +223,11 @@ export function App() {
         const entries = await openWorkspace(folderPath);
         setRootPath(folderPath);
         setFileTree(toFsEntries(entries));
+        // Clear old session state before restarting Pi with new workspace CWD
+        useStreamStore.getState().clearMessages();
+        useStreamStore.setState({ sessionId: "", sessionName: "", sessionDir: "", sessionStatus: "idle", hasAutoTitled: false });
+        // Restart Pi so its CWD matches the new workspace
+        await restartPi();
       } finally {
         stopLoading();
       }
@@ -268,6 +349,9 @@ export function App() {
         )}
         <GitStatus />
         <div style={{ flex: 1 }} />
+        <CostIndicator />
+        <ThinkingLevelPicker />
+        <ModelPicker />
         <ContextDial />
       </div>
 

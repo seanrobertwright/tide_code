@@ -60,7 +60,8 @@ impl PiConnection {
                                 .get("type")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("unknown");
-                            tracing::trace!("Pi event: {}", event_type);
+                            tracing::debug!("Pi event: {} (keys: {:?})", event_type,
+                                val.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default());
 
                             if tx.send(val).is_err() {
                                 tracing::info!("Pi event channel closed");

@@ -1,81 +1,260 @@
 import { create } from "zustand";
 import { respondUiRequest } from "../lib/ipc";
 import { onPiUiRequest, type PiUiRequest } from "../lib/pi-events";
+import { usePermissionStore } from "./permissionStore";
 
-export interface ApprovalRequest {
+// ── UI Request Types ───────────────────────────────────────
+
+export interface UiRequestBase {
   requestId: string;
   title: string;
   message: string;
+}
+
+export interface ConfirmRequest extends UiRequestBase {
+  method: "confirm";
   toolName?: string;
   safetyLevel?: string;
-  /** Diff preview data (populated by tide-safety.ts for write/edit tools) */
   filePath?: string;
   originalContent?: string;
   newContent?: string;
 }
 
+export interface SelectRequest extends UiRequestBase {
+  method: "select";
+  options: Array<{ value: string; label: string; description?: string }>;
+}
+
+export interface InputRequest extends UiRequestBase {
+  method: "input";
+  inputType: "text" | "number";
+  placeholder?: string;
+}
+
+export interface EditorRequest extends UiRequestBase {
+  method: "editor";
+  initialValue: string;
+  language?: string;
+}
+
+export interface NotifyRequest {
+  id: string;
+  method: "notify";
+  message: string;
+  level: "info" | "warning" | "error" | "success";
+  timestamp: number;
+}
+
+export type UiRequest = ConfirmRequest | SelectRequest | InputRequest | EditorRequest;
+
+// ── Store ──────────────────────────────────────────────────
+
 interface ApprovalState {
-  pendingApprovals: ApprovalRequest[];
-  currentApproval: ApprovalRequest | null;
-  addApproval: (req: ApprovalRequest) => void;
+  pendingRequests: UiRequest[];
+  currentRequest: UiRequest | null;
+  notifications: NotifyRequest[];
+  piStatus: Record<string, string>;
+
+  addRequest: (req: UiRequest) => void;
+  respond: (requestId: string, response: Record<string, unknown>) => Promise<void>;
+  dismissNotification: (id: string) => void;
+  setPiStatus: (id: string, text: string) => void;
+
+  // Legacy compat
+  currentApproval: UiRequest | null;
+  pendingApprovals: UiRequest[];
+  addApproval: (req: UiRequest) => void;
   respondToApproval: (requestId: string, approved: boolean) => Promise<void>;
 }
 
-export const useApprovalStore = create<ApprovalState>((set) => ({
-  pendingApprovals: [],
-  currentApproval: null,
+export const useApprovalStore = create<ApprovalState>((set, get) => ({
+  pendingRequests: [],
+  currentRequest: null,
+  notifications: [],
+  piStatus: {},
 
-  addApproval: (req: ApprovalRequest) => {
+  addRequest: (req: UiRequest) => {
     set((state) => {
-      const updated = [...state.pendingApprovals, req];
+      const updated = [...state.pendingRequests, req];
       return {
+        pendingRequests: updated,
+        currentRequest: state.currentRequest ?? req,
+        // Legacy compat
         pendingApprovals: updated,
-        currentApproval: state.currentApproval ?? req,
+        currentApproval: state.currentRequest ?? req,
       };
     });
   },
 
-  respondToApproval: async (requestId: string, approved: boolean) => {
+  respond: async (requestId: string, response: Record<string, unknown>) => {
     try {
-      await respondUiRequest(requestId, approved);
+      await respondUiRequest(requestId, response);
     } catch (err) {
-      console.error("[approval] Failed to send response:", err);
+      console.error("[piui] Failed to send response:", err);
     }
 
     set((state) => {
-      const remaining = state.pendingApprovals.filter(
-        (a) => a.requestId !== requestId,
-      );
+      const remaining = state.pendingRequests.filter((r) => r.requestId !== requestId);
       return {
+        pendingRequests: remaining,
+        currentRequest: remaining[0] ?? null,
         pendingApprovals: remaining,
         currentApproval: remaining[0] ?? null,
       };
     });
   },
+
+  dismissNotification: (id: string) => {
+    set((state) => ({
+      notifications: state.notifications.filter((n) => n.id !== id),
+    }));
+  },
+
+  setPiStatus: (id: string, text: string) => {
+    set((state) => ({
+      piStatus: { ...state.piStatus, [id]: text },
+    }));
+  },
+
+  // Legacy compat
+  get currentApproval() { return get().currentRequest; },
+  get pendingApprovals() { return get().pendingRequests; },
+  addApproval: (req: UiRequest) => get().addRequest(req),
+  respondToApproval: async (requestId: string, approved: boolean) => {
+    await get().respond(requestId, { confirmed: approved });
+  },
 }));
 
-// Initialize listener for Pi extension UI requests
+// ── Listener ───────────────────────────────────────────────
+
 let listenerInitialized = false;
 export function initApprovalListener(): void {
   if (listenerInitialized) return;
   listenerInitialized = true;
 
   onPiUiRequest((event: PiUiRequest) => {
-    // Map Pi's extension_ui_request to our ApprovalRequest format
-    if (event.method === "confirm") {
-      const payload = event as any;
-      useApprovalStore.getState().addApproval({
-        requestId: event.id,
-        title: event.title || "Approval Required",
-        message: event.message || "",
-        toolName: payload.toolName,
-        safetyLevel: payload.safetyLevel,
-        filePath: payload.filePath,
-        originalContent: payload.originalContent,
-        newContent: payload.newContent,
-      });
+    const store = useApprovalStore.getState();
+    const payload = event as any;
+
+    switch (event.method) {
+      case "confirm": {
+        let message = event.message || "";
+        let filePath = payload.filePath;
+        let originalContent = payload.originalContent;
+        let newContent = payload.newContent;
+        const toolName = payload.toolName || "";
+
+        // Parse diff data encoded by tide-safety.ts
+        const diffMatch = message.match(/<!--TIDE_DIFF:(.*?)-->/s);
+        if (diffMatch) {
+          try {
+            const diffData = JSON.parse(diffMatch[1]);
+            filePath = diffData.filePath;
+            originalContent = diffData.originalContent;
+            newContent = diffData.newContent;
+            message = message.replace(/\n<!--TIDE_DIFF:.*?-->/s, "");
+          } catch { /* ignore */ }
+        }
+
+        // Check permission cache — auto-respond if matched
+        const decision = usePermissionStore.getState().checkPermission(toolName, filePath);
+        if (decision === "allow") {
+          console.log(`[Tide] Auto-approved ${toolName} (cached permission)`);
+          respondUiRequest(event.id, { confirmed: true }).catch(() => {});
+          break;
+        }
+        if (decision === "deny") {
+          console.log(`[Tide] Auto-denied ${toolName} (cached permission)`);
+          respondUiRequest(event.id, { confirmed: false }).catch(() => {});
+          break;
+        }
+
+        store.addRequest({
+          method: "confirm",
+          requestId: event.id,
+          title: event.title || "Approval Required",
+          message,
+          toolName,
+          safetyLevel: payload.safetyLevel,
+          filePath,
+          originalContent,
+          newContent,
+        });
+        break;
+      }
+
+      case "select": {
+        const options = (payload.options || []).map((o: any) =>
+          typeof o === "string"
+            ? { value: o, label: o }
+            : { value: o.value || o.label, label: o.label || o.value, description: o.description }
+        );
+        store.addRequest({
+          method: "select",
+          requestId: event.id,
+          title: event.title || "Select an option",
+          message: event.message || "",
+          options,
+        });
+        break;
+      }
+
+      case "input": {
+        store.addRequest({
+          method: "input",
+          requestId: event.id,
+          title: event.title || "Input required",
+          message: event.message || payload.prompt || "",
+          inputType: payload.inputType || payload.type || "text",
+          placeholder: payload.placeholder,
+        });
+        break;
+      }
+
+      case "editor": {
+        store.addRequest({
+          method: "editor",
+          requestId: event.id,
+          title: event.title || "Edit content",
+          message: event.message || "",
+          initialValue: payload.initialValue || "",
+          language: payload.language,
+        });
+        break;
+      }
+
+      case "notify": {
+        const id = `notify-${Date.now()}`;
+        useApprovalStore.setState((state) => ({
+          notifications: [
+            ...state.notifications,
+            {
+              id,
+              method: "notify",
+              message: event.message || payload.message || "",
+              level: payload.level || "info",
+              timestamp: Date.now(),
+            },
+          ],
+        }));
+        // Auto-dismiss after 5s
+        setTimeout(() => {
+          useApprovalStore.getState().dismissNotification(id);
+        }, 5000);
+        break;
+      }
+
+      case "setStatus": {
+        const statusId = payload.id || payload.statusId || "default";
+        store.setPiStatus(statusId, payload.status || payload.text || "");
+        break;
+      }
+
+      default:
+        console.debug("[piui] Unhandled UI request method:", event.method, event);
+        break;
     }
   }).catch((err) => {
-    console.error("[approval] Failed to set up Pi UI listener:", err);
+    console.error("[piui] Failed to set up Pi UI listener:", err);
   });
 }

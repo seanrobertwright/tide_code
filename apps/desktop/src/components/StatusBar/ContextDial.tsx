@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useContextStore, type BudgetBreakdown } from "../../stores/contextStore";
+import { useIndexStore } from "../../stores/indexStore";
 
 const DIAL_SIZE = 18;
 const STROKE_WIDTH = 2.5;
@@ -14,14 +15,13 @@ const COLORS: Record<string, string> = {
 
 export function ContextDial() {
   const { breakdown, refreshBreakdown, openInspector } = useContextStore();
+  const { indexed, indexing, fileCount, symbolCount } = useIndexStore();
   const [showTooltip, setShowTooltip] = useState(false);
   const dialRef = useRef<HTMLDivElement>(null);
 
-  // Poll for breakdown updates
+  // Fetch breakdown once on mount — updates come via agent_end events
   useEffect(() => {
     refreshBreakdown();
-    const interval = setInterval(refreshBreakdown, 5000);
-    return () => clearInterval(interval);
   }, [refreshBreakdown]);
 
   const usagePercent = breakdown?.usagePercent ?? 0;
@@ -38,6 +38,24 @@ export function ContextDial() {
       onMouseLeave={() => setShowTooltip(false)}
       title=""
     >
+      {/* Index badge */}
+      {(indexed || indexing) && (
+        <span
+          style={{
+            ...s.indexBadge,
+            color: indexing ? "var(--warning)" : "#22c55e",
+            opacity: indexing ? 0.8 : 1,
+          }}
+          title={
+            indexing
+              ? "Indexing workspace..."
+              : `Indexed: ${fileCount} files, ${symbolCount} symbols`
+          }
+        >
+          IDX
+        </span>
+      )}
+
       <svg width={DIAL_SIZE} height={DIAL_SIZE} style={{ transform: "rotate(-90deg)" }}>
         {/* Background circle */}
         <circle
@@ -64,36 +82,73 @@ export function ContextDial() {
       </svg>
       <span style={{ ...s.label, color }}>{displayPercent}%</span>
 
-      {showTooltip && breakdown && (
-        <DialTooltip breakdown={breakdown} />
+      {showTooltip && (
+        <DialTooltip breakdown={breakdown} indexed={indexed} indexing={indexing} fileCount={fileCount} symbolCount={symbolCount} />
       )}
     </div>
   );
 }
 
-function DialTooltip({ breakdown }: { breakdown: BudgetBreakdown }) {
+function DialTooltip({
+  breakdown,
+  indexed,
+  indexing,
+  fileCount,
+  symbolCount,
+}: {
+  breakdown: BudgetBreakdown | null;
+  indexed: boolean;
+  indexing: boolean;
+  fileCount: number;
+  symbolCount: number;
+}) {
   return (
     <div style={s.tooltip}>
-      <div style={s.tooltipHeader}>
-        Context Budget: {Math.round(breakdown.usagePercent * 100)}%
-      </div>
-      <div style={s.tooltipRow}>
-        <span>Used</span>
-        <span>{breakdown.totalTokens.toLocaleString()} tokens</span>
-      </div>
-      <div style={s.tooltipRow}>
-        <span>Budget</span>
-        <span>{breakdown.budgetTokens.toLocaleString()} tokens</span>
-      </div>
-      {breakdown.categories.length > 0 && (
+      {breakdown && (
+        <>
+          <div style={s.tooltipHeader}>
+            Context Budget: {Math.round(breakdown.usagePercent * 100)}%
+          </div>
+          <div style={s.tooltipRow}>
+            <span>Used</span>
+            <span>{breakdown.totalTokens.toLocaleString()} tokens</span>
+          </div>
+          <div style={s.tooltipRow}>
+            <span>Budget</span>
+            <span>{breakdown.budgetTokens.toLocaleString()} tokens</span>
+          </div>
+          {breakdown.categories.length > 0 && (
+            <>
+              <div style={s.tooltipDivider} />
+              {breakdown.categories.map((cat) => (
+                <div key={cat.category} style={s.tooltipRow}>
+                  <span style={s.tooltipCategory}>{formatCategory(cat.category)}</span>
+                  <span>{cat.tokens.toLocaleString()}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </>
+      )}
+      {(indexed || indexing) && (
         <>
           <div style={s.tooltipDivider} />
-          {breakdown.categories.map((cat) => (
-            <div key={cat.category} style={s.tooltipRow}>
-              <span style={s.tooltipCategory}>{formatCategory(cat.category)}</span>
-              <span>{cat.tokens.toLocaleString()}</span>
+          <div style={{ ...s.tooltipHeader, fontSize: "var(--font-size-xs)" }}>
+            {indexing ? "Indexing..." : "Code Index"}
+          </div>
+          <div style={s.tooltipRow}>
+            <span>Files indexed</span>
+            <span>{fileCount.toLocaleString()}</span>
+          </div>
+          <div style={s.tooltipRow}>
+            <span>Symbols</span>
+            <span>{symbolCount.toLocaleString()}</span>
+          </div>
+          {indexed && (
+            <div style={{ ...s.tooltipCategory, fontSize: 10, marginTop: 2 }}>
+              Symbol retrieval saves ~95% tokens vs full file reads
             </div>
-          ))}
+          )}
         </>
       )}
       <div style={s.tooltipHint}>Click to open inspector</div>
@@ -118,6 +173,12 @@ const s: Record<string, React.CSSProperties> = {
     fontSize: "var(--font-size-xs)",
     fontWeight: 500,
     fontFamily: "var(--font-mono)",
+  },
+  indexBadge: {
+    fontSize: 9,
+    fontWeight: 700,
+    fontFamily: "var(--font-mono)",
+    letterSpacing: "0.5px",
   },
   tooltip: {
     position: "absolute",

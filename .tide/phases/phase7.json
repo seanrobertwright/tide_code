@@ -4,67 +4,71 @@
   "name": "Router + Task Classification",
   "description": "Build the intelligence layer that makes Tide more than a passthrough. Classify tasks before sending to Pi, select appropriate models, introduce planning phase for complex tasks, and track costs.",
   "created": "2026-03-04",
+  "completed": "2026-03-05",
   "notes": [
     "Router lives as a Pi extension (tide-router.ts) using before_agent_start hook.",
     "Planner lives as a Pi extension (tide-planner.ts) for generating feature plans.",
-    "Orchestration state management will live in Rust (Phase 8).",
-    "Cost tracking uses token counts from Pi state events.",
-    "Phase 6 (Pi wiring) must be complete — router needs model switching to work."
+    "Router communicates to UI via ctx.ui.setStatus() → approvalStore.piStatus channel.",
+    "RouterStatus.tsx handles model_override by calling setPiModel() IPC.",
+    "Plans stored in .tide/plans/<slug>.json, read via Rust IPC (plans_list, plan_read).",
+    "PlanTab added as third tab in AgentPanel (Chat / Logs / Plan).",
+    "CostIndicator enhanced with click-to-expand popover showing token breakdown and model pricing.",
+    "Cost tracking uses token counts from Pi get_session_stats (no separate costStore needed)."
   ],
 
   "tasks": [
     {
       "id": "TIDE-065",
       "title": "Create tide-router.ts Pi extension",
-      "description": "Pi extension that intercepts before_agent_start hook. Analyzes user prompt using heuristics: keyword matching (refactor, architect, redesign → complex), length, question marks, file count references. Classifies as quick/standard/complex. Sets model: quick → fast model (haiku/flash), standard → balanced (sonnet), complex → powerful (opus). Emits routing_decision event to UI.",
-      "files": ["apps/desktop/pi-extensions/tide-router.ts"],
-      "status": "pending",
+      "description": "Pi extension that intercepts before_agent_start hook. Analyzes user prompt using heuristics: keyword matching (refactor, architect, redesign → complex), length, question marks, file count references. Classifies as quick/standard/complex. Pushes routing decision to UI via ctx.ui.setStatus('router', ...). Configurable via TIDE.md (router_enabled, router_mode, router_*_model).",
+      "files": ["apps/desktop/pi-extensions/tide-router.ts", "apps/desktop/src-tauri/src/lib.rs"],
+      "status": "done",
       "priority": "high"
     },
     {
       "id": "TIDE-066",
       "title": "Build Router Status UI",
-      "description": "Status bar component showing current routing decision: task classification badge (quick/standard/complex), active model name, and a manual override dropdown. Reads routing_decision events from Pi event stream via routerStore.ts.",
+      "description": "StatusBar component showing current routing decision: colored dot + tier label (Quick/Standard/Complex). Reads piStatus['router'] from approvalStore. Also handles piStatus['model_override'] to auto-switch model via setPiModel IPC. No separate routerStore needed — uses existing approvalStore.piStatus channel.",
       "files": [
-        "src/components/StatusBar/RouterStatus.tsx",
-        "src/stores/routerStore.ts",
-        "src/App.tsx"
+        "apps/desktop/src/components/StatusBar/RouterStatus.tsx",
+        "apps/desktop/src/App.tsx"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "medium"
     },
     {
       "id": "TIDE-067",
       "title": "Create Feature Plan Generator (tide-planner.ts)",
-      "description": "Pi extension for complex tasks. When router classifies a task as complex, the orchestrator triggers a planning phase: a separate Pi prompt with a planning system prompt that outputs a structured JSON plan to .tide/features/<slug>.json. Plan format: { slug, title, description, steps: [{ id, description, status, files, acceptanceCriteria }], createdAt }.",
+      "description": "Pi extension that registers tide_plan_create, tide_plan_update, tide_plan_list tools. For complex tasks, injects planning instructions into systemPrompt. Plans stored in .tide/plans/<slug>.json. Pushes active plan to UI via ctx.ui.setStatus('planner', ...).",
       "files": [
-        "apps/desktop/pi-extensions/tide-planner.ts"
+        "apps/desktop/pi-extensions/tide-planner.ts",
+        "apps/desktop/src-tauri/src/lib.rs"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "high"
     },
     {
       "id": "TIDE-068",
       "title": "Build Plan Viewer Panel",
-      "description": "New tab in AgentPanel (Chat / Logs / Plan). Reads .tide/features/ via Rust FS commands. Shows active plan steps as a checklist with status indicators (pending/in-progress/done). Clicking a step shows its description and target files. Steps update status as the builder executes them.",
+      "description": "New 'Plan' tab in AgentPanel. PlanTab.tsx shows active plan with progress bar, step checklist, and historical plans. planStore.ts subscribes to approvalStore.piStatus['planner'] for real-time updates. Rust IPC commands plans_list and plan_read for loading historical plans from .tide/plans/.",
       "files": [
-        "src/components/AgentPanel/PlanTab.tsx",
-        "src/stores/planStore.ts",
-        "src/components/AgentPanel/AgentPanel.tsx"
+        "apps/desktop/src/components/AgentPanel/PlanTab.tsx",
+        "apps/desktop/src/stores/planStore.ts",
+        "apps/desktop/src/components/AgentPanel/AgentPanel.tsx",
+        "apps/desktop/src-tauri/src/lib.rs",
+        "apps/desktop/src/lib/ipc.ts"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "medium"
     },
     {
       "id": "TIDE-069",
-      "title": "Build Cost Tracker",
-      "description": "Track token usage per prompt (input + output tokens). Display cumulative cost estimate in status bar based on model pricing tables. costStore.ts accumulates per-prompt costs. CostIndicator.tsx shows session total. Pricing: Opus ~$15/$75, Sonnet ~$3/$15, Haiku ~$0.25/$1.25 per million tokens.",
+      "title": "Enhance Cost Tracker",
+      "description": "Enhanced CostIndicator.tsx with click-to-expand popover showing input/output token breakdown, cache stats, total cost, and per-model pricing reference. MODEL_PRICING table covers Opus, Sonnet, Haiku, Gemini Flash/Pro. No separate costStore needed — uses sessionStats from streamStore.",
       "files": [
-        "src/stores/costStore.ts",
-        "src/components/StatusBar/CostIndicator.tsx",
-        "src/App.tsx"
+        "apps/desktop/src/components/StatusBar/CostIndicator.tsx"
       ],
-      "status": "pending",
+      "status": "done",
       "priority": "medium"
     }
   ]
