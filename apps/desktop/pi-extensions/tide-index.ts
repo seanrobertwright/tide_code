@@ -59,9 +59,12 @@ function getRepoId(db: any, cwd: string): number | null {
 }
 
 export default function tideIndex(pi: ExtensionAPI) {
+  process.stderr.write(`[tide:index] Extension loaded, Database available: ${!!Database}\n`);
+
   // Inject system prompt about available index tools
   pi.on("before_agent_start", async (_event, ctx) => {
     const dbPath = path.join(ctx.cwd, ".tide", "index.db");
+    process.stderr.write(`[tide:index] cwd=${ctx.cwd}, dbPath=${dbPath}, exists=${fs.existsSync(dbPath)}\n`);
     if (!fs.existsSync(dbPath)) return;
 
     const db = getDb(ctx.cwd);

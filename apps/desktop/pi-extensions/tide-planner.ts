@@ -457,6 +457,93 @@ export default function tidePlanner(pi: ExtensionAPI) {
     },
   });
 
+  // ── Tool: Revise / Replace Plan ────────────────────────
+
+  pi.registerTool({
+    name: "tide_plan_revise",
+    description:
+      "Revise an existing plan by replacing its title, description, and/or steps. " +
+      "Use this instead of tide_plan_create when the user asks to enhance, refine, " +
+      "edit, or redo a plan that already exists. Preserves the plan ID, slug, and " +
+      "any step summaries/completion status where step titles match.",
+    parameters: Type.Object({
+      planId: Type.String({ description: "ID of the plan to revise" }),
+      title: Type.Optional(Type.String({ description: "New plan title (omit to keep existing)" })),
+      description: Type.Optional(Type.String({ description: "New plan description (omit to keep existing)" })),
+      steps: Type.Optional(
+        Type.Array(
+          Type.Object({
+            title: Type.String({ description: "Step title" }),
+            description: Type.String({ description: "Detailed description" }),
+            files: Type.Optional(Type.Array(Type.String())),
+            dependencies: Type.Optional(Type.Array(Type.String())),
+            expectedOutcome: Type.Optional(Type.String()),
+            assignedModel: Type.Optional(
+              Type.Object({
+                provider: Type.String(),
+                id: Type.String(),
+                name: Type.String(),
+              }),
+            ),
+          }),
+          { description: "Replacement steps (overwrites existing steps)" },
+        ),
+      ),
+      context: Type.Optional(Type.String({ description: "Updated context/notes" })),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      const plan = loadPlan(ctx.cwd, params.planId);
+      if (!plan) {
+        return {
+          content: [{ type: "text" as const, text: `Plan not found: ${params.planId}` }],
+          isError: true,
+        };
+      }
+
+      if (params.title) plan.title = params.title;
+      if (params.description) plan.description = params.description;
+      if (params.context !== undefined) plan.context = params.context;
+
+      if (params.steps) {
+        // Build a map of existing step summaries/status by title for preservation
+        const existingByTitle = new Map<string, PlanStep>();
+        for (const s of plan.steps) {
+          existingByTitle.set(s.title.toLowerCase(), s);
+        }
+
+        plan.steps = params.steps.map((s, i) => {
+          const existing = existingByTitle.get(s.title.toLowerCase());
+          return {
+            id: `step-${i + 1}`,
+            title: s.title,
+            description: s.description,
+            status: existing?.status ?? ("pending" as const),
+            files: s.files,
+            dependencies: s.dependencies,
+            expectedOutcome: s.expectedOutcome,
+            assignedModel: s.assignedModel,
+            summary: existing?.summary,
+            completedAt: existing?.completedAt,
+          };
+        });
+      }
+
+      plan.updatedAt = new Date().toISOString();
+      savePlan(ctx.cwd, plan);
+      ctx.ui.setStatus("planner", JSON.stringify(plan));
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `Revised plan "${plan.title}" — now has ${plan.steps.length} steps (${plan.id})`,
+          },
+        ],
+        details: { planId: plan.id, slug: plan.slug },
+      };
+    },
+  });
+
   // ── Tool: List Plans ────────────────────────────────────
 
   pi.registerTool({

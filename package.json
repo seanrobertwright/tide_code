@@ -15,10 +15,12 @@
   },
   "pnpm": {
     "onlyBuiltDependencies": [
-      "esbuild"
+      "esbuild",
+      "better-sqlite3"
     ]
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.55.4"
+    "@mariozechner/pi-coding-agent": "^0.55.4",
+    "better-sqlite3": "^11.0.0"
   }
 }
