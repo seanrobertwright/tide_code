@@ -1,0 +1,58 @@
+.appBar {
+  display: flex;
+  align-items: center;
+  height: 28px;
+  /* left padding clears macOS traffic lights in overlay mode */
+  padding: 0 8px 0 72px;
+  background: var(--bg-tertiary);
+  border-bottom: 1px solid var(--border);
+  font-size: var(--font-size-sm);
+  user-select: none;
+}
+
+.settingsBtn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: color 0.12s, background 0.12s;
+}
+
+.settingsBtn:hover {
+  color: var(--text-bright);
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.spacer {
+  flex: 1;
+}
+
+.folderName {
+  font-weight: 600;
+  color: var(--text-bright);
+  font-size: var(--font-size-sm);
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: 12px;
+}
+
+.statusDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+
+.statusText {
+  color: var(--text-secondary);
+  font-size: var(--font-size-xs);
+}

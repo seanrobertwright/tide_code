@@ -4,9 +4,11 @@ import { ProviderSettings } from "./ProviderSettings";
 import { SafetyPlaceholder } from "./SafetyPlaceholder";
 import { SkillsPlaceholder } from "./SkillsPlaceholder";
 import { KeyboardShortcuts } from "./KeyboardShortcuts";
+import { RoutingSettings } from "./RoutingSettings";
 
 const SECTIONS: { id: SettingsSection; label: string }[] = [
   { id: "providers", label: "Provider Keys" },
+  { id: "routing", label: "Routing" },
   { id: "safety", label: "Safety" },
   { id: "skills", label: "Skills" },
   { id: "shortcuts", label: "Shortcuts" },
@@ -52,6 +54,7 @@ export function SettingsModal() {
         {/* Content */}
         <div style={s.content}>
           {activeSection === "providers" && <ProviderSettings />}
+          {activeSection === "routing" && <RoutingSettings />}
           {activeSection === "safety" && <SafetyPlaceholder />}
           {activeSection === "skills" && <SkillsPlaceholder />}
           {activeSection === "shortcuts" && <KeyboardShortcuts />}

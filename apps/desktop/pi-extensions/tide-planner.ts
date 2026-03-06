@@ -17,6 +17,8 @@ interface PlanStep {
   description: string;
   status: "pending" | "in_progress" | "completed" | "skipped";
   files?: string[];
+  dependencies?: string[];
+  expectedOutcome?: string;
   assignedModel?: ModelRef;
   summary?: string;
   completedAt?: string;
@@ -161,10 +163,30 @@ export default function tidePlanner(pi: ExtensionAPI) {
     if (isComplex && !activePlan) {
       injections.push(
         "## Planning Mode\n\n" +
-        "This appears to be a complex task. Before implementing, create a structured plan " +
-        "using the `tide_plan_create` tool. Break the work into clear steps with file targets. " +
-        "Update step status with `tide_plan_update` as you complete each step. " +
-        "When finishing a step, use `tide_plan_step_summary` to record what was done.",
+        "This is a complex task. Follow these steps IN ORDER before writing any code:\n\n" +
+        "### Step 1: Explore\n" +
+        "Use Read, Glob, and Grep tools to understand the current codebase architecture. " +
+        "Identify existing patterns, conventions, relevant files, and potential impact areas. " +
+        "Pay special attention to how similar features are already implemented. Do NOT skip this.\n\n" +
+        "### Step 2: Clarify\n" +
+        "If there are ambiguities about scope, approach, or user preferences, call `tide_plan_clarify` " +
+        "with specific questions. Each question should have 2-4 concrete suggested answers. " +
+        "Examples: technology choices, scope boundaries, error handling strategy, testing approach.\n\n" +
+        "### Step 3: Create Plan\n" +
+        "Call `tide_plan_create` with a DETAILED plan. Each step MUST include:\n" +
+        "- **Specific file paths** for every file to create or modify\n" +
+        "- **Detailed description**: not just 'Update X' but exactly what changes, why, and how\n" +
+        "- **Dependencies**: which step IDs must complete before this one can start\n" +
+        "- **Expected outcome**: what the codebase should look like after this step\n" +
+        "- **Atomic scope**: each step should be small enough that a different model could execute it " +
+        "with only the step description and plan context (no conversation history needed)\n\n" +
+        "### Step 4: Execute\n" +
+        "Work through each step sequentially. Before each step:\n" +
+        "1. Call `tide_plan_update` to mark the step `in_progress`\n" +
+        "2. Implement the changes\n" +
+        "3. Call `tide_plan_step_summary` with a concise summary of what was done\n" +
+        "4. Call `tide_plan_update` to mark it `completed`\n\n" +
+        "IMPORTANT: Do NOT skip the exploration phase. Plans without thorough codebase understanding are always shallow.",
       );
     }
 
@@ -187,8 +209,10 @@ export default function tidePlanner(pi: ExtensionAPI) {
       steps: Type.Array(
         Type.Object({
           title: Type.String({ description: "Step title" }),
-          description: Type.String({ description: "What this step accomplishes" }),
-          files: Type.Optional(Type.Array(Type.String({ description: "Target file paths" }))),
+          description: Type.String({ description: "Detailed description: what changes, why, and how" }),
+          files: Type.Optional(Type.Array(Type.String({ description: "Target file paths (create or modify)" }))),
+          dependencies: Type.Optional(Type.Array(Type.String({ description: "IDs of steps that must complete first (e.g. 'step-1')" }))),
+          expectedOutcome: Type.Optional(Type.String({ description: "What the codebase should look like after this step" })),
           assignedModel: Type.Optional(
             Type.Object({
               provider: Type.String({ description: "Model provider (e.g. openai, anthropic)" }),
@@ -220,6 +244,8 @@ export default function tidePlanner(pi: ExtensionAPI) {
           description: s.description,
           status: "pending" as const,
           files: s.files,
+          dependencies: s.dependencies,
+          expectedOutcome: s.expectedOutcome,
           assignedModel: s.assignedModel,
         })),
         initialModel,
@@ -239,6 +265,76 @@ export default function tidePlanner(pi: ExtensionAPI) {
           },
         ],
         details: { planId: plan.id, slug: plan.slug },
+      };
+    },
+  });
+
+  // ── Tool: Clarify Before Planning ─────────────────────
+
+  pi.registerTool({
+    name: "tide_plan_clarify",
+    description:
+      "Ask the user clarifying questions before creating a plan. " +
+      "Each question has suggested answers the user can pick from, plus optional free-text input. " +
+      "This tool blocks until the user responds. Use when you need to narrow down scope, " +
+      "technology choices, or approach before planning.",
+    parameters: Type.Object({
+      questions: Type.Array(
+        Type.Object({
+          id: Type.String({ description: "Unique question identifier (e.g. 'auth_approach')" }),
+          question: Type.String({ description: "The question to ask the user" }),
+          options: Type.Array(
+            Type.Object({
+              value: Type.String({ description: "Option value returned in the answer" }),
+              label: Type.String({ description: "Display label for the option" }),
+              description: Type.Optional(Type.String({ description: "Brief explanation of this option" })),
+            }),
+            { description: "2-4 suggested answers" },
+          ),
+          allowFreeText: Type.Optional(Type.Boolean({ description: "Allow custom text input (default true)" })),
+        }),
+        { description: "List of clarifying questions" },
+      ),
+    }),
+    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // Broadcast full question set to frontend for rendering
+      ctx.ui.setStatus("clarify", JSON.stringify({ questions: params.questions }));
+
+      // Block until user responds — input() returns user's answer string
+      const response = await ctx.ui.input("Plan Clarification", "Waiting for your answers...");
+
+      // Clear the clarify status
+      ctx.ui.setStatus("clarify", undefined);
+
+      if (!response) {
+        return {
+          content: [{ type: "text" as const, text: "User skipped clarification." }],
+        };
+      }
+
+      // Response is a JSON string of { questionId: selectedValue }
+      let answers: Record<string, string>;
+      try {
+        answers = JSON.parse(response);
+      } catch {
+        answers = { raw: response };
+      }
+
+      const formatted = Object.entries(answers)
+        .map(([qId, answer]) => {
+          const q = params.questions.find((q) => q.id === qId);
+          return `- **${q?.question || qId}**: ${answer}`;
+        })
+        .join("\n");
+
+      return {
+        content: [
+          {
+            type: "text" as const,
+            text: `User's answers to clarifying questions:\n${formatted}`,
+          },
+        ],
+        details: { answers },
       };
     },
   });

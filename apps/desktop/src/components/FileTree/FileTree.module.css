@@ -26,11 +26,11 @@
 }
 
 .itemActive {
-  background: rgba(0, 122, 204, 0.2);
+  background: rgba(122, 162, 247, 0.2);
 }
 
 .itemActive:hover {
-  background: rgba(0, 122, 204, 0.3);
+  background: rgba(122, 162, 247, 0.3);
 }
 
 .chevron {
@@ -65,4 +65,18 @@
 .dirName {
   color: var(--text-bright);
   font-weight: 500;
+}
+
+.inlineInput {
+  flex: 1;
+  min-width: 0;
+  height: 20px;
+  padding: 0 4px;
+  font-family: var(--font-ui);
+  font-size: var(--font-size-sm);
+  color: var(--text-bright);
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-sm);
+  outline: none;
 }

@@ -7,27 +7,27 @@
   padding: 0;
 }
 
-/* ── Dark theme custom properties ────────────────── */
+/* ── Tokyo Night theme custom properties ─────────── */
 :root {
-  --bg-primary: #1e1e1e;
-  --bg-secondary: #252526;
-  --bg-tertiary: #2d2d2d;
-  --bg-input: #3c3c3c;
+  --bg-primary: #13141c;
+  --bg-secondary: #181924;
+  --bg-tertiary: #1e1f2e;
+  --bg-input: #252736;
 
-  --text-primary: #cccccc;
-  --text-secondary: #858585;
-  --text-bright: #e0e0e0;
+  --text-primary: #a9b1d6;
+  --text-secondary: #565f89;
+  --text-bright: #c0caf5;
 
-  --accent: #007acc;
-  --accent-hover: #1a8ad4;
-  --accent-active: #005f9e;
+  --accent: #7aa2f7;
+  --accent-hover: #89b4fa;
+  --accent-active: #5d7ec7;
 
-  --border: #3c3c3c;
-  --border-focus: #007acc;
+  --border: #232433;
+  --border-focus: #7aa2f7;
 
-  --success: #22c55e;
-  --warning: #eab308;
-  --error: #ef4444;
+  --success: #9ece6a;
+  --warning: #e0af68;
+  --error: #f7768e;
 
   --font-mono: "Cascadia Code", "Fira Code", "JetBrains Mono", "SF Mono",
     "Consolas", monospace;
@@ -72,16 +72,16 @@ body {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #4a4a4a;
+  background: #2e3148;
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #606060;
+  background: #3b4261;
 }
 
 /* ── Selection ───────────────────────────────────── */
 ::selection {
-  background: rgba(0, 122, 204, 0.3);
+  background: rgba(122, 162, 247, 0.3);
 }
 
 /* ── Focus visible ───────────────────────────────── */
@@ -92,12 +92,12 @@ body {
 
 /* ── Region tag decorations (Monaco) ─────────────── */
 .region-tag-pinned {
-  background: rgba(0, 122, 204, 0.15);
+  background: rgba(122, 162, 247, 0.15);
   border-left: 2px solid var(--accent);
 }
 .region-tag-unpinned {
-  background: rgba(133, 133, 133, 0.08);
-  border-left: 2px solid rgba(133, 133, 133, 0.3);
+  background: rgba(86, 95, 137, 0.08);
+  border-left: 2px solid rgba(86, 95, 137, 0.3);
 }
 .region-tag-glyph {
   background: var(--accent);

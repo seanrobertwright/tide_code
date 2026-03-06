@@ -1,6 +1,8 @@
 import { useEffect, useState, useMemo } from "react";
 import { useContextStore } from "../../stores/contextStore";
 import { useRegionTagStore } from "../../stores/regionTagStore";
+import { useStreamStore } from "../../stores/stream";
+import { compactContext, newSession } from "../../lib/ipc";
 import type { RegionTag } from "@tide/shared";
 
 type FilterType = "all" | "pinned" | "unpinned";
@@ -8,12 +10,16 @@ type FilterType = "all" | "pinned" | "unpinned";
 export function ContextInspector() {
   const { inspectorOpen, closeInspector, breakdown } = useContextStore();
   const { tags, loadAllTags, togglePin, deleteTag } = useRegionTagStore();
+  const isCompacting = useStreamStore((s) => s.isCompacting);
   const [filter, setFilter] = useState<FilterType>("all");
   const [search, setSearch] = useState("");
+  const [confirmingNewSession, setConfirmingNewSession] = useState(false);
 
   useEffect(() => {
     if (inspectorOpen) {
       loadAllTags();
+    } else {
+      setConfirmingNewSession(false);
     }
   }, [inspectorOpen, loadAllTags]);
 
@@ -63,7 +69,7 @@ export function ContextInspector() {
 
         {/* Summary */}
         <div style={s.summary}>
-          <span>{allTags.length} tags ({pinnedCount} pinned)</span>
+          <span>{allTags.length} tag{allTags.length !== 1 ? "s" : ""}{pinnedCount > 0 ? ` (${pinnedCount} pinned)` : ""}</span>
           {breakdown && (
             <span style={{ color: breakdown.usagePercent > 0.85 ? "var(--error)" : "var(--text-secondary)" }}>
               {breakdown.totalTokens.toLocaleString()} / {breakdown.budgetTokens.toLocaleString()} tokens ({Math.round(breakdown.usagePercent * 100)}%)
@@ -73,29 +79,93 @@ export function ContextInspector() {
 
         {/* Info */}
         <div style={s.info}>
-          Pinned tags are automatically injected into the agent's system prompt.
-          Click a tag label to reference it in chat.
+          Select text in the editor and press <strong>Cmd+Shift+T</strong> to tag a code region.
+          Pin a tag to auto-inject it into the agent's system prompt.
         </div>
 
-        {/* Filters */}
-        <div style={s.filters}>
-          <input
-            style={s.searchInput}
-            type="text"
-            placeholder="Search tags..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <select
-            style={s.filterSelect}
-            value={filter}
-            onChange={(e) => setFilter(e.target.value as FilterType)}
+        {/* Action bar */}
+        <div style={s.actionBar}>
+          <button
+            style={{
+              ...s.actionBtn,
+              opacity: isCompacting ? 0.6 : 1,
+              cursor: isCompacting ? "not-allowed" : "pointer",
+            }}
+            onClick={async () => {
+              if (isCompacting) return;
+              useStreamStore.setState({ isCompacting: true });
+              try {
+                await compactContext();
+              } catch (err) {
+                console.error("[ContextInspector] Compact failed:", err);
+                useStreamStore.setState({ isCompacting: false });
+              }
+            }}
+            disabled={isCompacting}
+            type="button"
+            title="Summarize older messages to reduce token usage"
           >
-            <option value="all">All ({allTags.length})</option>
-            <option value="pinned">Pinned ({pinnedCount})</option>
-            <option value="unpinned">Unpinned ({allTags.length - pinnedCount})</option>
-          </select>
+            <span style={{ color: "var(--accent)" }}>{isCompacting ? "\u23F3" : "\u21BB"}</span>
+            {isCompacting ? " Compacting\u2026" : " Compact"}
+          </button>
+
+          {confirmingNewSession ? (
+            <div style={s.confirmGroup}>
+              <span style={s.confirmText}>Clear all messages?</span>
+              <button
+                style={s.confirmBtn}
+                onClick={async () => {
+                  await newSession();
+                  setConfirmingNewSession(false);
+                  closeInspector();
+                }}
+                type="button"
+              >
+                Confirm
+              </button>
+              <button
+                style={s.cancelBtn}
+                onClick={() => setConfirmingNewSession(false)}
+                type="button"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button
+              style={{ ...s.actionBtn, color: "var(--warning, #e8a838)" }}
+              onClick={() => setConfirmingNewSession(true)}
+              type="button"
+              title="Start a fresh session (clears all context)"
+            >
+              <span>{"\u2715"}</span> New Session
+            </button>
+          )}
         </div>
+
+        {/* Filters — only show when there are tags */}
+        {allTags.length > 0 && (
+          <div style={s.filters}>
+            <input
+              style={s.searchInput}
+              type="text"
+              placeholder="Search tags..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {pinnedCount > 0 && (
+              <select
+                style={s.filterSelect}
+                value={filter}
+                onChange={(e) => setFilter(e.target.value as FilterType)}
+              >
+                <option value="all">All ({allTags.length})</option>
+                <option value="pinned">Pinned ({pinnedCount})</option>
+                <option value="unpinned">Unpinned ({allTags.length - pinnedCount})</option>
+              </select>
+            )}
+          </div>
+        )}
 
         {/* Tag list */}
         <div style={s.itemList}>
@@ -217,6 +287,61 @@ const s: Record<string, React.CSSProperties> = {
     lineHeight: 1.4,
     borderBottom: "1px solid var(--border)",
     flexShrink: 0,
+  },
+  actionBar: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    padding: "6px 12px",
+    borderBottom: "1px solid var(--border)",
+    flexShrink: 0,
+    gap: 8,
+  },
+  actionBtn: {
+    background: "var(--bg-primary)",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    padding: "6px 12px",
+    fontSize: "var(--font-size-xs)",
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-ui)",
+    cursor: "pointer",
+    display: "flex",
+    alignItems: "center",
+    gap: 4,
+    whiteSpace: "nowrap" as const,
+    position: "relative" as const,
+    zIndex: 10,
+  },
+  confirmGroup: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+  },
+  confirmText: {
+    fontSize: "var(--font-size-xs)",
+    color: "var(--warning, #e8a838)",
+  },
+  confirmBtn: {
+    background: "var(--warning, #e8a838)",
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    padding: "3px 8px",
+    fontSize: "var(--font-size-xs)",
+    color: "#000",
+    fontFamily: "var(--font-ui)",
+    fontWeight: 600,
+    cursor: "pointer",
+  },
+  cancelBtn: {
+    background: "transparent",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    padding: "3px 8px",
+    fontSize: "var(--font-size-xs)",
+    color: "var(--text-secondary)",
+    fontFamily: "var(--font-ui)",
+    cursor: "pointer",
   },
   filters: {
     display: "flex",

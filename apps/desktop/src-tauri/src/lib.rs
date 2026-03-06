@@ -4,16 +4,22 @@ mod ipc;
 mod keychain;
 mod sidecar;
 
+mod orchestrator;
+mod pty;
+
 use ipc::PiConnection;
 use std::sync::Arc;
 use tauri::{Emitter, Manager};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
+use std::sync::Mutex as StdMutex;
 
 pub struct AppState {
     pub pi: Arc<Mutex<Option<PiConnection>>>,
     pub workspace_root: Arc<Mutex<Option<String>>>,
     pub _pi_child: Arc<Mutex<Option<tokio::process::Child>>>,
     pub indexer: Arc<Mutex<Option<indexer::IndexerState>>>,
+    pub agent_end_notify: Arc<Notify>,
+    pub pty_manager: StdMutex<pty::PtyManager>,
 }
 
 // ── Pi Agent Commands ───────────────────────────────────────
@@ -77,11 +83,13 @@ async fn restart_pi(
     state: tauri::State<'_, AppState>,
     app_handle: tauri::AppHandle,
 ) -> Result<(), String> {
-    // Kill existing Pi process
+    // Kill existing Pi process and wait for it to fully exit
     {
         let mut child_guard = state._pi_child.lock().await;
         if let Some(mut child) = child_guard.take() {
             let _ = child.kill().await;
+            // Wait for process to be fully reaped so fds are released
+            let _ = child.wait().await;
             tracing::info!("Killed existing Pi process");
         }
         let mut pi = state.pi.lock().await;
@@ -109,6 +117,7 @@ async fn restart_pi(
             // Re-wire event forwarding
             let event_rx = conn.event_rx.clone();
             let handle = app_handle.clone();
+            let agent_notify = state.agent_end_notify.clone();
             tokio::spawn(async move {
                 let mut rx = event_rx.lock().await;
                 loop {
@@ -118,11 +127,18 @@ async fn restart_pi(
                                 .get("type")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("unknown");
+                            if event_type == "model_select" || event_type.contains("model") {
+                                tracing::debug!("Forwarding model event (restart): {} — {}", event_type,
+                                    serde_json::to_string(&event).unwrap_or_default().chars().take(200).collect::<String>());
+                            }
                             if let Err(e) = handle.emit("pi_event", &event) {
                                 tracing::error!("Failed to emit pi_event ({}): {}", event_type, e);
                             }
                             if event_type == "extension_ui_request" {
                                 let _ = handle.emit("pi_ui_request", &event);
+                            }
+                            if event_type == "agent_end" {
+                                agent_notify.notify_waiters();
                             }
                         }
                         None => {
@@ -269,7 +285,7 @@ async fn list_sessions(
 
     // Collect directories to scan for .jsonl files
     let dirs_to_scan: Vec<std::path::PathBuf> = if let Some(d) = &session_dir {
-        tracing::info!("[list_sessions] Using provided session_dir: {}", d);
+        tracing::debug!("[list_sessions] Using provided session_dir: {}", d);
         vec![std::path::PathBuf::from(d)]
     } else {
         let root = state.workspace_root.lock().await;
@@ -280,12 +296,12 @@ async fn list_sessions(
         });
         drop(root);
 
-        tracing::info!("[list_sessions] No session_dir provided. workspace/cwd: {}", cwd);
-        tracing::info!("[list_sessions] sessions_root: {}", sessions_root.display());
+        tracing::debug!("[list_sessions] No session_dir provided. workspace/cwd: {}", cwd);
+        tracing::debug!("[list_sessions] sessions_root: {}", sessions_root.display());
 
         let slug = format!("-{}-", cwd.replace('/', "-"));
         let candidate = sessions_root.join(&slug);
-        tracing::info!("[list_sessions] Trying slug candidate: {} (exists: {})", candidate.display(), candidate.exists());
+        tracing::debug!("[list_sessions] Trying slug candidate: {} (exists: {})", candidate.display(), candidate.exists());
 
         if candidate.exists() {
             vec![candidate]
@@ -297,20 +313,20 @@ async fn list_sessions(
                     for entry in entries.flatten() {
                         let p = entry.path();
                         if p.is_dir() {
-                            tracing::info!("[list_sessions] Found subdirectory: {}", p.display());
+                            tracing::debug!("[list_sessions] Found subdirectory: {}", p.display());
                             dirs.push(p);
                         }
                     }
                 }
                 if dirs.is_empty() {
-                    tracing::info!("[list_sessions] No subdirs found, using sessions_root");
+                    tracing::debug!("[list_sessions] No subdirs found, using sessions_root");
                     vec![sessions_root.clone()]
                 } else {
-                    tracing::info!("[list_sessions] Scanning {} subdirectories", dirs.len());
+                    tracing::debug!("[list_sessions] Scanning {} subdirectories", dirs.len());
                     dirs
                 }
             } else {
-                tracing::info!("[list_sessions] sessions_root does not exist");
+                tracing::debug!("[list_sessions] sessions_root does not exist");
                 return Ok(serde_json::json!([]));
             }
         }
@@ -318,9 +334,9 @@ async fn list_sessions(
 
     let mut sessions = Vec::new();
 
-    tracing::info!("[list_sessions] Scanning {} directories", dirs_to_scan.len());
+    tracing::debug!("[list_sessions] Scanning {} directories", dirs_to_scan.len());
     for dir in &dirs_to_scan {
-        tracing::info!("[list_sessions] Scanning dir: {} (exists: {})", dir.display(), dir.exists());
+        tracing::debug!("[list_sessions] Scanning dir: {} (exists: {})", dir.display(), dir.exists());
         if !dir.exists() { continue; }
         let entries = match std::fs::read_dir(dir) {
             Ok(e) => e,
@@ -384,7 +400,7 @@ async fn list_sessions(
                     .to_string();
             }
 
-            tracing::info!("[list_sessions] Found session: {} (name: \"{}\", msgs: {})", file_path, name, message_count);
+            tracing::debug!("[list_sessions] Found session: {} (name: \"{}\", msgs: {})", file_path, name, message_count);
             sessions.push(serde_json::json!({
                 "file": file_path,
                 "name": name,
@@ -394,7 +410,7 @@ async fn list_sessions(
         }
     }
 
-    tracing::info!("[list_sessions] Total sessions found: {}", sessions.len());
+    tracing::debug!("[list_sessions] Total sessions found: {}", sessions.len());
 
     // Sort by most recently modified first
     sessions.sort_by(|a, b| {
@@ -683,6 +699,47 @@ async fn get_last_assistant_text(
     Ok(())
 }
 
+/// Start an orchestrated multi-phase pipeline: Route → Plan → Build → Review.
+/// Runs in the background. Progress emitted as `orchestration_event` Tauri events.
+#[tauri::command]
+async fn orchestrate(
+    state: tauri::State<'_, AppState>,
+    app_handle: tauri::AppHandle,
+    prompt: String,
+) -> Result<(), String> {
+    let workspace = {
+        let root = state.workspace_root.lock().await;
+        root.clone().ok_or("No workspace open")?
+    };
+
+    let pi_handle = {
+        let guard = state.pi.lock().await;
+        guard.as_ref().ok_or("Pi not connected")?.handle()
+    }; // Lock released here
+
+    let notify = state.agent_end_notify.clone();
+    let handle = app_handle.clone();
+
+    tokio::spawn(async move {
+        let orc = orchestrator::Orchestrator::new(workspace);
+        if let Err(e) = orc.run(prompt, pi_handle, handle.clone(), notify).await {
+            tracing::error!("Orchestration failed: {}", e);
+            let _ = handle.emit(
+                "orchestration_event",
+                serde_json::json!({
+                    "phase": "failed",
+                    "planId": serde_json::Value::Null,
+                    "currentStep": 0,
+                    "totalSteps": 0,
+                    "message": e,
+                }),
+            );
+        }
+    });
+
+    Ok(())
+}
+
 /// Respond to a Pi extension UI request.
 /// Supports confirm, select, input, editor responses.
 #[tauri::command]
@@ -838,6 +895,256 @@ fn detect_language(path: &str) -> &str {
     }
 }
 
+// ── Search Commands ─────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+struct SearchMatch {
+    line: usize,
+    column: usize,
+    length: usize,
+    text: String,
+}
+
+#[derive(serde::Serialize)]
+struct SearchFileResult {
+    file: String,
+    matches: Vec<SearchMatch>,
+}
+
+fn build_regex(query: &str, is_regex: bool, case_sensitive: bool, whole_word: bool) -> Result<regex::Regex, String> {
+    let pattern = if is_regex {
+        query.to_string()
+    } else {
+        regex::escape(query)
+    };
+    let pattern = if whole_word {
+        format!(r"\b{}\b", pattern)
+    } else {
+        pattern
+    };
+    let builder = regex::RegexBuilder::new(&pattern)
+        .case_insensitive(!case_sensitive)
+        .build()
+        .map_err(|e| e.to_string())?;
+    Ok(builder)
+}
+
+#[tauri::command]
+async fn fs_search(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    is_regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+    include_glob: Option<String>,
+    exclude_glob: Option<String>,
+    max_results: Option<usize>,
+) -> Result<serde_json::Value, String> {
+    let root = {
+        let w = state.workspace_root.lock().await;
+        w.clone().ok_or("No workspace open")?
+    };
+    let query_clone = query.clone();
+
+    tokio::task::spawn_blocking(move || {
+        let re = build_regex(&query_clone, is_regex, case_sensitive, whole_word)?;
+        let max = max_results.unwrap_or(5000);
+        let mut total_matches = 0usize;
+        let mut results: Vec<SearchFileResult> = Vec::new();
+
+        let mut walker = ignore::WalkBuilder::new(&root);
+        walker.hidden(true).git_ignore(true).git_global(false);
+
+        // Apply include glob
+        if let Some(ref inc) = include_glob {
+            if !inc.is_empty() {
+                let mut overrides = ignore::overrides::OverrideBuilder::new(&root);
+                for pat in inc.split(',') {
+                    let pat = pat.trim();
+                    if !pat.is_empty() {
+                        overrides.add(pat).map_err(|e| e.to_string())?;
+                    }
+                }
+                walker.overrides(overrides.build().map_err(|e| e.to_string())?);
+            }
+        }
+
+        // Apply exclude glob
+        if let Some(ref exc) = exclude_glob {
+            if !exc.is_empty() {
+                let mut overrides = ignore::overrides::OverrideBuilder::new(&root);
+                for pat in exc.split(',') {
+                    let pat = pat.trim();
+                    if !pat.is_empty() {
+                        overrides.add(&format!("!{}", pat)).map_err(|e| e.to_string())?;
+                    }
+                }
+                walker.overrides(overrides.build().map_err(|e| e.to_string())?);
+            }
+        }
+
+        for entry in walker.build().flatten() {
+            if total_matches >= max { break; }
+            let path = entry.path();
+            if !path.is_file() { continue; }
+
+            // Skip binary files
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let mut file_matches = Vec::new();
+            for (line_idx, line) in content.lines().enumerate() {
+                if total_matches >= max { break; }
+                for m in re.find_iter(line) {
+                    file_matches.push(SearchMatch {
+                        line: line_idx + 1,
+                        column: m.start() + 1,
+                        length: m.len(),
+                        text: line.to_string(),
+                    });
+                    total_matches += 1;
+                    if total_matches >= max { break; }
+                }
+            }
+
+            if !file_matches.is_empty() {
+                results.push(SearchFileResult {
+                    file: path.to_string_lossy().to_string(),
+                    matches: file_matches,
+                });
+            }
+        }
+
+        serde_json::to_value(&results).map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn fs_replace_in_file(
+    path: String,
+    search: String,
+    replace: String,
+    is_regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+) -> Result<usize, String> {
+    let re = build_regex(&search, is_regex, case_sensitive, whole_word)?;
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let count = re.find_iter(&content).count();
+    let new_content = re.replace_all(&content, replace.as_str()).to_string();
+    std::fs::write(&path, new_content).map_err(|e| e.to_string())?;
+    Ok(count)
+}
+
+#[tauri::command]
+async fn fs_replace_all(
+    state: tauri::State<'_, AppState>,
+    search: String,
+    replace: String,
+    is_regex: bool,
+    case_sensitive: bool,
+    whole_word: bool,
+    include_glob: Option<String>,
+    exclude_glob: Option<String>,
+) -> Result<serde_json::Value, String> {
+    let root = {
+        let w = state.workspace_root.lock().await;
+        w.clone().ok_or("No workspace open")?
+    };
+
+    tokio::task::spawn_blocking(move || {
+        let re = build_regex(&search, is_regex, case_sensitive, whole_word)?;
+        let mut files_changed = 0usize;
+        let mut total_replacements = 0usize;
+
+        let mut walker = ignore::WalkBuilder::new(&root);
+        walker.hidden(true).git_ignore(true).git_global(false);
+
+        if let Some(ref inc) = include_glob {
+            if !inc.is_empty() {
+                let mut overrides = ignore::overrides::OverrideBuilder::new(&root);
+                for pat in inc.split(',') {
+                    let pat = pat.trim();
+                    if !pat.is_empty() {
+                        overrides.add(pat).map_err(|e| e.to_string())?;
+                    }
+                }
+                walker.overrides(overrides.build().map_err(|e| e.to_string())?);
+            }
+        }
+
+        if let Some(ref exc) = exclude_glob {
+            if !exc.is_empty() {
+                let mut overrides = ignore::overrides::OverrideBuilder::new(&root);
+                for pat in exc.split(',') {
+                    let pat = pat.trim();
+                    if !pat.is_empty() {
+                        overrides.add(&format!("!{}", pat)).map_err(|e| e.to_string())?;
+                    }
+                }
+                walker.overrides(overrides.build().map_err(|e| e.to_string())?);
+            }
+        }
+
+        for entry in walker.build().flatten() {
+            let path = entry.path();
+            if !path.is_file() { continue; }
+
+            let content = match std::fs::read_to_string(path) {
+                Ok(c) => c,
+                Err(_) => continue,
+            };
+
+            let count = re.find_iter(&content).count();
+            if count > 0 {
+                let new_content = re.replace_all(&content, replace.as_str()).to_string();
+                if std::fs::write(path, new_content).is_ok() {
+                    files_changed += 1;
+                    total_replacements += count;
+                }
+            }
+        }
+
+        Ok(serde_json::json!({
+            "filesChanged": files_changed,
+            "totalReplacements": total_replacements,
+        }))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── File CRUD Commands ──────────────────────────────────────
+
+#[tauri::command]
+async fn fs_create_file(path: String, content: Option<String>) -> Result<(), String> {
+    std::fs::write(&path, content.unwrap_or_default()).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fs_create_dir(path: String) -> Result<(), String> {
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fs_rename(old_path: String, new_path: String) -> Result<(), String> {
+    std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn fs_delete(path: String) -> Result<(), String> {
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    if meta.is_dir() {
+        std::fs::remove_dir_all(&path).map_err(|e| e.to_string())
+    } else {
+        std::fs::remove_file(&path).map_err(|e| e.to_string())
+    }
+}
+
 // ── Keychain Commands ───────────────────────────────────────
 
 #[tauri::command]
@@ -945,6 +1252,20 @@ async fn plan_read(
     Ok(plan)
 }
 
+#[tauri::command]
+async fn plan_delete(
+    state: tauri::State<'_, AppState>,
+    slug: String,
+) -> Result<(), String> {
+    let root = state.workspace_root.lock().await;
+    let workspace = root.as_deref().ok_or("No workspace open")?;
+    let path = plans_dir_path(workspace).join(format!("{}.json", slug));
+    if !path.exists() {
+        return Err(format!("Plan not found: {}", slug));
+    }
+    std::fs::remove_file(&path).map_err(|e| e.to_string())
+}
+
 // ── Permission Commands ─────────────────────────────────────
 
 fn permissions_file_path(workspace: &str) -> std::path::PathBuf {
@@ -994,6 +1315,15 @@ async fn git_status(
     git::get_status(workspace)
 }
 
+#[tauri::command]
+async fn git_changed_files(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<git::ChangedFile>, String> {
+    let root = state.workspace_root.lock().await;
+    let workspace = root.as_deref().ok_or("No workspace open")?;
+    git::list_changed_files(workspace)
+}
+
 // ── App Setup ───────────────────────────────────────────────
 
 fn resolve_extension_paths() -> Vec<String> {
@@ -1041,10 +1371,13 @@ pub fn run() {
             workspace_root: Arc::new(Mutex::new(None)),
             _pi_child: Arc::new(Mutex::new(None)),
             indexer: Arc::new(Mutex::new(None)),
+            agent_end_notify: Arc::new(Notify::new()),
+            pty_manager: StdMutex::new(pty::PtyManager::new()),
         })
         .setup(|app| {
             let pi_state = app.state::<AppState>().inner().pi.clone();
             let child_state = app.state::<AppState>().inner()._pi_child.clone();
+            let agent_end_notify = app.state::<AppState>().inner().agent_end_notify.clone();
             let app_handle = app.handle().clone();
 
             tauri::async_runtime::spawn(async move {
@@ -1063,6 +1396,7 @@ pub fn run() {
                         // Background task: read Pi events, emit to React
                         let event_rx = conn.event_rx.clone();
                         let handle = app_handle.clone();
+                        let agent_notify = agent_end_notify.clone();
                         tokio::spawn(async move {
                             let mut rx = event_rx.lock().await;
                             loop {
@@ -1072,6 +1406,12 @@ pub fn run() {
                                             .get("type")
                                             .and_then(|t| t.as_str())
                                             .unwrap_or("unknown");
+
+                                        // Log model-related events for debugging router sync
+                                        if event_type == "model_select" || event_type.contains("model") {
+                                            tracing::debug!("Forwarding model event: {} — {}", event_type,
+                                                serde_json::to_string(&event).unwrap_or_default().chars().take(200).collect::<String>());
+                                        }
 
                                         // Emit all Pi events as "pi_event"
                                         if let Err(e) = handle.emit("pi_event", &event) {
@@ -1085,6 +1425,11 @@ pub fn run() {
                                         // Also emit typed events for specific handlers
                                         if event_type == "extension_ui_request" {
                                             let _ = handle.emit("pi_ui_request", &event);
+                                        }
+
+                                        // Signal orchestrator when agent completes
+                                        if event_type == "agent_end" {
+                                            agent_notify.notify_waiters();
                                         }
                                     }
                                     None => {
@@ -1118,14 +1463,23 @@ pub fn run() {
             get_pi_status,
             get_pi_state,
             respond_ui_request,
+            orchestrate,
             open_workspace,
             fs_list_dir,
             fs_read_file,
+            fs_create_file,
+            fs_create_dir,
+            fs_rename,
+            fs_delete,
+            fs_search,
+            fs_replace_in_file,
+            fs_replace_all,
             keychain_set_key,
             keychain_get_key,
             keychain_delete_key,
             keychain_has_key,
             git_status,
+            git_changed_files,
             tags_load,
             tags_save,
             set_pi_model,
@@ -1155,6 +1509,7 @@ pub fn run() {
             permissions_save,
             plans_list,
             plan_read,
+            plan_delete,
             indexer::index_workspace_cmd,
             indexer::index_file_tree,
             indexer::index_file_outline,
@@ -1163,6 +1518,11 @@ pub fn run() {
             indexer::index_repo_outline,
             indexer::index_status,
             indexer::index_invalidate,
+            pty::pty_create,
+            pty::pty_attach,
+            pty::pty_write,
+            pty::pty_resize,
+            pty::pty_kill,
         ])
         .run(tauri::generate_context!())
         .expect("error while running Tide");

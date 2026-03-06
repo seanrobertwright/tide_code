@@ -6,12 +6,13 @@ const SHORTCUTS: { category: string; items: { keys: string; description: string 
       { keys: "Cmd+O", description: "Open Folder" },
       { keys: "Cmd+B", description: "Toggle File Tree" },
       { keys: "Cmd+,", description: "Open Settings" },
+      { keys: "Cmd+T", description: "Toggle Terminal" },
     ],
   },
   {
     category: "Editor",
     items: [
-      { keys: "Cmd+Shift+T", description: "Tag Selected Region" },
+      { keys: "Cmd+Shift+T", description: "Tag Selected Region (Editor & Terminal)" },
     ],
   },
   {

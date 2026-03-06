@@ -1,9 +1,14 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useStreamStore, type ChatMessage, type ToolCallMessage, type SystemMessage } from "../../stores/stream";
-import { sendPrompt, abortAgent, steerAgent, followUp, newSession, listSessions, switchSession, deleteSession, getPiState, type SessionInfo } from "../../lib/ipc";
+import { sendPrompt, abortAgent, steerAgent, followUp, newSession, listSessions, switchSession, deleteSession, getPiState, orchestrate, type SessionInfo } from "../../lib/ipc";
 import { LogsTab } from "./LogsTab";
 import { PlanTab } from "./PlanTab";
 import { MessageRenderer } from "./MessageRenderer";
+import { ClarifyCard } from "./ClarifyCard";
+import { PipelineProgress } from "./PipelineProgress";
+import { ChangesetViewer } from "./ChangesetViewer";
+import { useApprovalStore } from "../../stores/approvalStore";
+import { useOrchestrationStore } from "../../stores/orchestrationStore";
 import css from "./AgentPanel.module.css";
 
 type TabId = "chat" | "logs" | "plan";
@@ -190,6 +195,7 @@ function SessionDropdown({
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
+  const [confirmDeleteFile, setConfirmDeleteFile] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
@@ -253,32 +259,56 @@ function SessionDropdown({
                 <div className={css.sessionGroupLabel}>{group}</div>
                 {items.map(sess => {
                   const isActive = sess.file === currentSessionId;
+                  const isConfirming = confirmDeleteFile === sess.file;
                   return (
-                    <button
-                      key={sess.file}
-                      className={`${css.sessionItem}${isActive ? ` ${css.sessionItemActive}` : ""}`}
-                      onClick={() => onSwitch(sess.file)}
-                      type="button"
-                    >
-                      <span className={css.sessionItemName}>{sess.name || "Untitled"}</span>
-                      {sess.updatedAt != null && (
-                        <span className={css.sessionItemMeta}>
-                          {formatSessionTime(Number(sess.updatedAt), group)}
-                        </span>
+                    <div key={sess.file} style={{ position: "relative" }}>
+                      {isConfirming && (
+                        <div style={s.sessionConfirmOverlay}>
+                          <span style={s.sessionConfirmText}>Delete chat?</span>
+                          <button
+                            style={s.sessionConfirmYes}
+                            onClick={() => {
+                              setConfirmDeleteFile(null);
+                              onDelete(sess.file);
+                            }}
+                            type="button"
+                          >
+                            Delete
+                          </button>
+                          <button
+                            style={s.sessionConfirmNo}
+                            onClick={() => setConfirmDeleteFile(null)}
+                            type="button"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       )}
-                      <span
-                        className={css.sessionDeleteBtn}
-                        role="button"
-                        tabIndex={-1}
-                        onClick={e => {
-                          e.stopPropagation();
-                          onDelete(sess.file);
-                        }}
-                        onMouseDown={e => e.stopPropagation()}
+                      <button
+                        className={`${css.sessionItem}${isActive ? ` ${css.sessionItemActive}` : ""}`}
+                        onClick={() => onSwitch(sess.file)}
+                        type="button"
                       >
-                        &times;
-                      </span>
-                    </button>
+                        <span className={css.sessionItemName}>{sess.name || "Untitled"}</span>
+                        {sess.updatedAt != null && (
+                          <span className={css.sessionItemMeta}>
+                            {formatSessionTime(Number(sess.updatedAt), group)}
+                          </span>
+                        )}
+                        <span
+                          className={css.sessionDeleteBtn}
+                          role="button"
+                          tabIndex={-1}
+                          onClick={e => {
+                            e.stopPropagation();
+                            setConfirmDeleteFile(sess.file);
+                          }}
+                          onMouseDown={e => e.stopPropagation()}
+                        >
+                          &times;
+                        </span>
+                      </button>
+                    </div>
                   );
                 })}
               </div>
@@ -288,6 +318,19 @@ function SessionDropdown({
       </div>
     </>
   );
+}
+
+// ── Orchestration helpers ────────────────────────────────────
+
+const COMPLEX_KEYWORDS = [
+  "refactor", "architect", "redesign", "implement", "migrate",
+  "rewrite", "overhaul", "restructure", "build out", "from scratch",
+];
+
+function isComplexPrompt(text: string): boolean {
+  const lower = text.toLowerCase();
+  if (lower.length > 800) return true;
+  return COMPLEX_KEYWORDS.some((kw) => lower.includes(kw));
 }
 
 // ── AgentPanel ──────────────────────────────────────────────
@@ -300,6 +343,10 @@ export function AgentPanel() {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const snippetsRef = useRef<Map<string, { label: string; code: string; lang: string }>>(new Map());
   const { messages, isStreaming, isCompacting, isRetrying, sessionStatus, addUserMessage } = useStreamStore();
+  const clarifyQuestions = useApprovalStore((s) => s.clarifyQuestions);
+  const clarifyInputRequestId = useApprovalStore((s) => s.clarifyInputRequestId);
+  const orcPhase = useOrchestrationStore((s) => s.phase);
+  const [forceOrchestrate, setForceOrchestrate] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -336,8 +383,6 @@ export function AgentPanel() {
     const msg = buildMessage(rawText, snippetsRef.current, images);
     if (!msg.trim()) return;
 
-    console.log("[Tide:send] isStreaming:", isStreaming, "agentActive:", useStreamStore.getState().agentActive, "msg:", msg.slice(0, 50));
-
     // Clear
     if (composerRef.current) composerRef.current.innerHTML = "";
     snippetsRef.current.clear();
@@ -351,20 +396,28 @@ export function AgentPanel() {
     });
 
     if (isStreaming) {
-      console.log("[Tide:send] Streaming mode — using steer/follow_up");
       addUserMessage(`[steer] ${msg}`);
       try { await steerAgent(msg); } catch {
         try { await followUp(msg); } catch (e) { console.error("Steer/follow_up failed:", e); }
       }
     } else {
-      // Routing is handled by the tide-router Pi extension in before_agent_start.
-      // No frontend classification needed — just send the prompt.
       addUserMessage(msg);
-      try {
-        await sendPrompt(msg, imagePayloads.length > 0 ? imagePayloads : undefined);
-      } catch (e) { console.error("Send failed:", e); }
+
+      // Determine if this should use orchestration
+      const shouldOrchestrate = forceOrchestrate || isComplexPrompt(msg);
+      if (forceOrchestrate) setForceOrchestrate(false); // Reset toggle after use
+
+      if (shouldOrchestrate && imagePayloads.length === 0) {
+        try {
+          await orchestrate(msg);
+        } catch (e) { console.error("Orchestrate failed:", e); }
+      } else {
+        try {
+          await sendPrompt(msg, imagePayloads.length > 0 ? imagePayloads : undefined);
+        } catch (e) { console.error("Send failed:", e); }
+      }
     }
-  }, [isStreaming, addUserMessage, images]);
+  }, [isStreaming, addUserMessage, images, forceOrchestrate]);
 
   const handleAbort = async () => {
     try { await abortAgent(); } catch (e) { console.error("Abort failed:", e); }
@@ -428,6 +481,10 @@ export function AgentPanel() {
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // Cmd/Ctrl+Enter forces orchestration
+      if (e.metaKey || e.ctrlKey) {
+        setForceOrchestrate(true);
+      }
       handleSend();
     }
   }, [handleSend]);
@@ -466,9 +523,7 @@ export function AgentPanel() {
                   try {
                     const sessionDir = useStreamStore.getState().sessionDir;
                     const sessionId = useStreamStore.getState().sessionId;
-                    console.log("[Tide:sessions] sessionDir:", sessionDir, "sessionId:", sessionId);
                     const result = await listSessions(sessionDir || undefined);
-                    console.log("[Tide:sessions] listSessions returned:", result.length, "sessions", result);
                     setSessions(result);
                   } catch (e) { console.error("[Tide:sessions] listSessions error:", e); setSessions([]); }
                   setShowSessions(true);
@@ -534,6 +589,7 @@ export function AgentPanel() {
       {/* Tab content */}
       {activeTab === "chat" ? (
         <>
+          {orcPhase !== "idle" && <PipelineProgress />}
           <div ref={scrollRef} className={css.chatScroll}>
             {sessionStatus === "loading" || sessionStatus === "switching" ? (
               <div style={s.sessionLoading}>Loading session...</div>
@@ -544,6 +600,10 @@ export function AgentPanel() {
                 {messages.map((msg) => (
                   <ChatBubble key={msg.id} message={msg} />
                 ))}
+                {clarifyQuestions && clarifyInputRequestId && (
+                  <ClarifyCard questions={clarifyQuestions} />
+                )}
+                <ChangesetViewer />
               </div>
             )}
           </div>
@@ -601,6 +661,15 @@ export function AgentPanel() {
                   type="button"
                 >
                   <ImageIcon />
+                </button>
+                <button
+                  className={css.toolbarBtn}
+                  onClick={() => setForceOrchestrate((v) => !v)}
+                  title={forceOrchestrate ? "Orchestration ON (click to disable)" : "Force orchestration (Cmd+Enter)"}
+                  type="button"
+                  style={forceOrchestrate ? { color: "var(--accent)" } : undefined}
+                >
+                  <PipelineIcon />
                 </button>
                 {isStreaming && (
                   <button className={css.stopBtn} onClick={handleAbort} type="button">
@@ -850,6 +919,18 @@ function SearchIcon() {
   );
 }
 
+function PipelineIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+      <line x1="7" y1="12" x2="10" y2="12" />
+      <line x1="14" y1="12" x2="17" y2="12" />
+    </svg>
+  );
+}
+
 function ImageIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -872,7 +953,7 @@ const s: Record<string, React.CSSProperties> = {
   messageList: { display: "flex", flexDirection: "column", gap: 2, padding: "12px 14px 16px" },
   userRow: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
   roleLabel: { display: "flex", alignItems: "center", gap: 6, fontSize: "var(--font-size-xs)", fontWeight: 600, fontFamily: "var(--font-ui)", color: "var(--text-secondary)", textTransform: "uppercase" as const, letterSpacing: "0.4px" },
-  userBubble: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-sm)", lineHeight: 1.55, color: "var(--text-bright)", padding: "8px 12px", background: "rgba(0, 122, 204, 0.08)", borderRadius: "var(--radius-md)", border: "1px solid rgba(0, 122, 204, 0.15)", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const },
+  userBubble: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-sm)", lineHeight: 1.55, color: "var(--text-bright)", padding: "8px 12px", background: "rgba(122, 162, 247, 0.08)", borderRadius: "var(--radius-md)", border: "1px solid rgba(122, 162, 247, 0.15)", whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const },
   assistantRow: { display: "flex", flexDirection: "column", gap: 4, marginTop: 8 },
   assistantBubble: { padding: "2px 0" },
   streamingDot: { display: "inline-block", width: 6, height: 6, borderRadius: "50%", background: "var(--accent)", animation: "pulse 1s ease-in-out infinite" },
@@ -898,4 +979,8 @@ const s: Record<string, React.CSSProperties> = {
   systemIcon: { fontSize: 11, color: "var(--accent)", opacity: 0.7, flexShrink: 0 },
   systemText: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-xs)", color: "var(--text-secondary)", fontStyle: "italic" },
   sessionLoading: { display: "flex", alignItems: "center", justifyContent: "center", height: "100%", fontFamily: "var(--font-ui)", fontSize: "var(--font-size-sm)", color: "var(--text-secondary)", fontStyle: "italic" },
+  sessionConfirmOverlay: { position: "absolute" as const, inset: 0, zIndex: 2, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: "var(--bg-tertiary)", borderRadius: "var(--radius-sm)", border: "1px solid var(--border)" },
+  sessionConfirmText: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-xs)", color: "var(--text-primary)", fontWeight: 500 },
+  sessionConfirmYes: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-xs)", fontWeight: 500, color: "#fff", background: "var(--error, #f87171)", border: "none", borderRadius: "var(--radius-sm)", padding: "2px 8px", cursor: "pointer" },
+  sessionConfirmNo: { fontFamily: "var(--font-ui)", fontSize: "var(--font-size-xs)", fontWeight: 500, color: "var(--text-secondary)", background: "transparent", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "2px 8px", cursor: "pointer" },
 };

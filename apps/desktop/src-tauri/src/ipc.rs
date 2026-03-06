@@ -4,6 +4,28 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::process::{ChildStdin, ChildStdout};
 use tokio::sync::{mpsc, Mutex};
 
+/// Lightweight cloneable handle for sending commands to Pi.
+/// Used by the orchestrator to send prompts without holding the main PiConnection lock.
+#[derive(Clone)]
+pub struct PiHandle {
+    writer: Arc<Mutex<BufWriter<ChildStdin>>>,
+}
+
+impl PiHandle {
+    /// Send a JSON command to Pi's stdin (one JSON object per line).
+    pub async fn send(
+        &self,
+        cmd: &Value,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        let json = serde_json::to_string(cmd)?;
+        let mut writer = self.writer.lock().await;
+        writer.write_all(json.as_bytes()).await?;
+        writer.write_all(b"\n").await?;
+        writer.flush().await?;
+        Ok(())
+    }
+}
+
 /// Connection to a Pi process via stdin/stdout JSON lines.
 pub struct PiConnection {
     writer: Arc<Mutex<BufWriter<ChildStdin>>>,
@@ -13,6 +35,13 @@ pub struct PiConnection {
 }
 
 impl PiConnection {
+    /// Get a cloneable handle for sending commands without holding the connection lock.
+    pub fn handle(&self) -> PiHandle {
+        PiHandle {
+            writer: self.writer.clone(),
+        }
+    }
+
     pub fn new(stdin: ChildStdin, stdout: ChildStdout) -> Self {
         let writer = Arc::new(Mutex::new(BufWriter::new(stdin)));
         let (event_tx, event_rx) = mpsc::unbounded_channel::<Value>();
@@ -60,8 +89,15 @@ impl PiConnection {
                                 .get("type")
                                 .and_then(|t| t.as_str())
                                 .unwrap_or("unknown");
-                            tracing::debug!("Pi event: {} (keys: {:?})", event_type,
-                                val.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default());
+
+                            // Log model-related events at debug level for diagnostics
+                            if event_type == "model_select" || event_type.contains("model") {
+                                tracing::debug!("Pi event [model]: {} — {:?}", event_type,
+                                    val.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default());
+                            } else {
+                                tracing::trace!("Pi event: {} (keys: {:?})", event_type,
+                                    val.as_object().map(|o| o.keys().collect::<Vec<_>>()).unwrap_or_default());
+                            }
 
                             if tx.send(val).is_err() {
                                 tracing::info!("Pi event channel closed");

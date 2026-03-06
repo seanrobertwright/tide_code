@@ -63,3 +63,45 @@ pub fn get_status(workspace_root: &str) -> Result<GitStatusInfo, String> {
         untracked,
     })
 }
+
+#[derive(Serialize)]
+pub struct ChangedFile {
+    pub path: String,
+    pub status: String, // "modified", "added", "deleted", "renamed", "untracked"
+}
+
+/// List all changed files with their status (working tree + index).
+pub fn list_changed_files(workspace_root: &str) -> Result<Vec<ChangedFile>, String> {
+    let repo = Repository::discover(workspace_root).map_err(|e| e.to_string())?;
+
+    let mut opts = StatusOptions::new();
+    opts.include_untracked(true);
+    opts.recurse_untracked_dirs(false);
+
+    let statuses = repo.statuses(Some(&mut opts)).map_err(|e| e.to_string())?;
+    let mut files = Vec::new();
+
+    for entry in statuses.iter() {
+        let path = entry.path().unwrap_or("").to_string();
+        let st = entry.status();
+
+        let status = if st.intersects(git2::Status::WT_NEW | git2::Status::INDEX_NEW) {
+            "added"
+        } else if st.intersects(git2::Status::WT_DELETED | git2::Status::INDEX_DELETED) {
+            "deleted"
+        } else if st.intersects(git2::Status::WT_RENAMED | git2::Status::INDEX_RENAMED) {
+            "renamed"
+        } else if st.intersects(git2::Status::WT_MODIFIED | git2::Status::INDEX_MODIFIED) {
+            "modified"
+        } else {
+            "untracked"
+        };
+
+        files.push(ChangedFile {
+            path,
+            status: status.to_string(),
+        });
+    }
+
+    Ok(files)
+}

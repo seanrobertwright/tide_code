@@ -15,7 +15,25 @@ try {
 
 function getDb(cwd: string) {
   const dbPath = path.join(cwd, ".tide", "index.db");
-  if (!fs.existsSync(dbPath)) return null;
+  if (!fs.existsSync(dbPath)) {
+    // Search parent directories for .tide/index.db
+    let dir = cwd;
+    for (let i = 0; i < 5; i++) {
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+      const parentDbPath = path.join(dir, ".tide", "index.db");
+      if (fs.existsSync(parentDbPath)) {
+        process.stderr.write(`[tide:index] DB not at ${dbPath}, found at ${parentDbPath}\n`);
+        try {
+          const db = new Database(parentDbPath, { readonly: true });
+          db.pragma("journal_mode = WAL");
+          return db;
+        } catch { return null; }
+      }
+    }
+    return null;
+  }
   if (!Database) return null;
   try {
     const db = new Database(dbPath, { readonly: true });
@@ -27,8 +45,17 @@ function getDb(cwd: string) {
 }
 
 function getRepoId(db: any, cwd: string): number | null {
-  const row = db.prepare("SELECT id FROM repos WHERE root_path = ?").get(cwd);
-  return row ? (row as any).id : null;
+  // Try exact match first
+  let row = db.prepare("SELECT id FROM repos WHERE root_path = ?").get(cwd);
+  if (row) return (row as any).id;
+  // Fallback: try without trailing slash, or with it
+  const trimmed = cwd.endsWith("/") ? cwd.slice(0, -1) : cwd;
+  row = db.prepare("SELECT id FROM repos WHERE root_path = ? OR root_path = ?").get(trimmed, trimmed + "/");
+  if (row) return (row as any).id;
+  // Last resort: if only one repo exists, use it
+  row = db.prepare("SELECT id FROM repos LIMIT 2").all();
+  if (Array.isArray(row) && row.length === 1) return (row[0] as any).id;
+  return null;
 }
 
 export default function tideIndex(pi: ExtensionAPI) {

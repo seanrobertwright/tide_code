@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { usePlanStore, type Plan, type PlanStep } from "../../stores/planStore";
+import { useWorkspaceStore } from "../../stores/workspace";
 import { openFileByPath } from "../../lib/fileHelpers";
 
 // ── Status Icons ────────────────────────────────────────────
@@ -25,6 +26,38 @@ const PLAN_STATUS_COLORS: Record<Plan["status"], string> = {
   failed: "var(--error, #f87171)",
 };
 
+const PLAN_STATUS_DOT: Record<Plan["status"], string> = {
+  planning: "var(--accent)",
+  in_progress: "var(--warning, #fb923c)",
+  completed: "var(--success, #4ade80)",
+  failed: "var(--error, #f87171)",
+};
+
+// ── Helpers ─────────────────────────────────────────────────
+
+function relativeTime(dateStr: string): string {
+  const now = Date.now();
+  const then = new Date(dateStr).getTime();
+  const diffMs = now - then;
+  const diffSec = Math.floor(diffMs / 1000);
+  if (diffSec < 60) return "just now";
+  const diffMin = Math.floor(diffSec / 60);
+  if (diffMin < 60) return `${diffMin}m ago`;
+  const diffHr = Math.floor(diffMin / 60);
+  if (diffHr < 24) return `${diffHr}h ago`;
+  const diffDays = Math.floor(diffHr / 24);
+  if (diffDays === 1) return "yesterday";
+  if (diffDays < 30) return `${diffDays}d ago`;
+  return new Date(dateStr).toLocaleDateString();
+}
+
+function stepProgress(plan: Plan): string {
+  const done = plan.steps.filter(
+    (s) => s.status === "completed" || s.status === "skipped",
+  ).length;
+  return `${done}/${plan.steps.length}`;
+}
+
 // ── Component ───────────────────────────────────────────────
 
 export function PlanTab() {
@@ -32,14 +65,25 @@ export function PlanTab() {
   const plans = usePlanStore((s) => s.plans);
   const loading = usePlanStore((s) => s.loading);
   const loadPlans = usePlanStore((s) => s.loadPlans);
-  const [selectedPlan, setSelectedPlan] = useState<Plan | null>(null);
-  const [showHistory, setShowHistory] = useState(false);
+  const deletePlan = usePlanStore((s) => s.deletePlan);
+  const rootPath = useWorkspaceStore((s) => s.rootPath);
+  const [selectedPlanId, setSelectedPlanId] = useState<string | null>(null);
+  const [confirmDeleteSlug, setConfirmDeleteSlug] = useState<string | null>(null);
 
   useEffect(() => {
     loadPlans();
   }, [loadPlans]);
 
-  const plan = selectedPlan || activePlan;
+  // Resolve selected plan: explicit selection > active plan
+  const plan =
+    plans.find((p) => p.id === selectedPlanId) || activePlan;
+
+  const handlePlanClick = (p: Plan) => {
+    setSelectedPlanId(p.id === selectedPlanId ? null : p.id);
+    if (rootPath && p.slug) {
+      openFileByPath(`${rootPath}/.tide/plans/${p.slug}.json`);
+    }
+  };
 
   if (!plan && plans.length === 0) {
     return (
@@ -55,15 +99,96 @@ export function PlanTab() {
     );
   }
 
-  const completedSteps = plan?.steps.filter(
-    (st) => st.status === "completed" || st.status === "skipped",
-  ).length ?? 0;
+  const completedSteps =
+    plan?.steps.filter(
+      (st) => st.status === "completed" || st.status === "skipped",
+    ).length ?? 0;
   const totalSteps = plan?.steps.length ?? 0;
   const progress = totalSteps > 0 ? (completedSteps / totalSteps) * 100 : 0;
 
+  // Sort plans: most recent first
+  const sortedPlans = [...plans].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+  );
+
   return (
     <div style={s.container}>
-      {/* Plan Header */}
+      {/* Plan List — always visible at top */}
+      {sortedPlans.length > 0 && (
+        <div style={s.planList}>
+          <div style={s.planListHeader}>
+            <span style={s.planListLabel}>Plans</span>
+            {loading && <span style={s.loadingDot}>loading...</span>}
+          </div>
+          <div style={s.planListItems}>
+            {sortedPlans.map((p) => {
+              const isSelected = plan?.id === p.id;
+              const isConfirming = confirmDeleteSlug === p.slug;
+              return (
+                <div key={p.id} style={{ position: "relative" }}>
+                  {isConfirming && (
+                    <div style={s.confirmOverlay}>
+                      <span style={s.confirmText}>Delete this plan?</span>
+                      <button
+                        style={s.confirmYes}
+                        onClick={() => {
+                          deletePlan(p.slug);
+                          setConfirmDeleteSlug(null);
+                          if (selectedPlanId === p.id) setSelectedPlanId(null);
+                        }}
+                      >
+                        Delete
+                      </button>
+                      <button
+                        style={s.confirmNo}
+                        onClick={() => setConfirmDeleteSlug(null)}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    style={{
+                      ...s.planRow,
+                      ...(isSelected ? s.planRowActive : {}),
+                    }}
+                    onClick={() => handlePlanClick(p)}
+                  >
+                    <span
+                      style={{
+                        ...s.statusDot,
+                        backgroundColor: PLAN_STATUS_DOT[p.status],
+                      }}
+                    />
+                    <span style={s.planRowTitle}>{p.title}</span>
+                    <span style={s.planRowProgress}>{stepProgress(p)}</span>
+                    <span style={s.planRowDate}>
+                      {relativeTime(p.createdAt)}
+                    </span>
+                    <span
+                      style={s.deleteBtn}
+                      role="button"
+                      tabIndex={-1}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setConfirmDeleteSlug(p.slug);
+                      }}
+                      onMouseDown={(e) => e.stopPropagation()}
+                    >
+                      &times;
+                    </span>
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Divider */}
+      {plan && sortedPlans.length > 0 && <div style={s.divider} />}
+
+      {/* Plan Detail */}
       {plan && (
         <>
           <div style={s.header}>
@@ -110,47 +235,6 @@ export function PlanTab() {
             ))}
           </div>
         </>
-      )}
-
-      {/* History Toggle */}
-      {plans.length > 0 && (
-        <div style={s.historySection}>
-          <button
-            style={s.historyToggle}
-            onClick={() => {
-              if (!showHistory) loadPlans();
-              setShowHistory(!showHistory);
-            }}
-          >
-            {showHistory ? "▾" : "▸"} History ({plans.length})
-          </button>
-
-          {showHistory && (
-            <div style={s.historyList}>
-              {loading && <p style={s.loadingText}>Loading...</p>}
-              {plans.map((p) => (
-                <button
-                  key={p.id}
-                  style={{
-                    ...s.historyItem,
-                    ...(plan?.id === p.id ? s.historyItemActive : {}),
-                  }}
-                  onClick={() => setSelectedPlan(p.id === plan?.id ? null : p)}
-                >
-                  <span style={s.historyTitle}>{p.title}</span>
-                  <span
-                    style={{
-                      ...s.historyStatus,
-                      color: PLAN_STATUS_COLORS[p.status],
-                    }}
-                  >
-                    {p.status}
-                  </span>
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
       )}
     </div>
   );
@@ -236,6 +320,142 @@ const s: Record<string, React.CSSProperties> = {
     margin: 0,
     lineHeight: 1.5,
   },
+
+  // ── Plan List ──────────────────────────────────────────
+  planList: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 4,
+  },
+  planListHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingBottom: 4,
+  },
+  planListLabel: {
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--font-size-xs)",
+    fontWeight: 600,
+    color: "var(--text-secondary)",
+    textTransform: "uppercase" as const,
+    letterSpacing: "0.5px",
+  },
+  loadingDot: {
+    fontFamily: "var(--font-ui)",
+    fontSize: 10,
+    color: "var(--text-secondary)",
+    opacity: 0.6,
+  },
+  planListItems: {
+    display: "flex",
+    flexDirection: "column",
+    gap: 1,
+    maxHeight: 200,
+    overflow: "auto",
+  },
+  planRow: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    width: "100%",
+    padding: "6px 8px",
+    background: "transparent",
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    cursor: "pointer",
+    textAlign: "left" as const,
+    transition: "background 0.1s",
+  },
+  planRowActive: {
+    background: "var(--bg-tertiary)",
+  },
+  statusDot: {
+    width: 7,
+    height: 7,
+    borderRadius: "50%",
+    flexShrink: 0,
+  },
+  planRowTitle: {
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--font-size-sm)",
+    color: "var(--text-primary)",
+    flex: 1,
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap" as const,
+  },
+  planRowProgress: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 10,
+    color: "var(--text-secondary)",
+    flexShrink: 0,
+  },
+  planRowDate: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 10,
+    color: "var(--text-secondary)",
+    opacity: 0.7,
+    flexShrink: 0,
+  },
+  deleteBtn: {
+    fontFamily: "var(--font-ui)",
+    fontSize: 14,
+    color: "var(--text-secondary)",
+    opacity: 0.3,
+    cursor: "pointer",
+    padding: "0 2px",
+    lineHeight: 1,
+    flexShrink: 0,
+  },
+  confirmOverlay: {
+    position: "absolute" as const,
+    inset: 0,
+    zIndex: 2,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    background: "var(--bg-tertiary)",
+    borderRadius: "var(--radius-sm)",
+    border: "1px solid var(--border)",
+  },
+  confirmText: {
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--font-size-xs)",
+    color: "var(--text-primary)",
+    fontWeight: 500,
+  },
+  confirmYes: {
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--font-size-xs)",
+    fontWeight: 500,
+    color: "#fff",
+    background: "var(--error, #f87171)",
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    padding: "2px 8px",
+    cursor: "pointer",
+  },
+  confirmNo: {
+    fontFamily: "var(--font-ui)",
+    fontSize: "var(--font-size-xs)",
+    fontWeight: 500,
+    color: "var(--text-secondary)",
+    background: "transparent",
+    border: "1px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    padding: "2px 8px",
+    cursor: "pointer",
+  },
+
+  // ── Divider ────────────────────────────────────────────
+  divider: {
+    height: 1,
+    backgroundColor: "var(--border)",
+  },
+
+  // ── Plan Detail ────────────────────────────────────────
   header: {
     display: "flex",
     flexDirection: "column",
@@ -352,57 +572,5 @@ const s: Record<string, React.CSSProperties> = {
     border: "none",
     cursor: "pointer",
     textAlign: "left" as const,
-  },
-  historySection: {
-    borderTop: "1px solid var(--border)",
-    paddingTop: 8,
-    marginTop: "auto",
-  },
-  historyToggle: {
-    background: "transparent",
-    border: "none",
-    fontFamily: "var(--font-ui)",
-    fontSize: "var(--font-size-xs)",
-    color: "var(--text-secondary)",
-    cursor: "pointer",
-    padding: "4px 0",
-  },
-  historyList: {
-    display: "flex",
-    flexDirection: "column",
-    gap: 2,
-    marginTop: 4,
-  },
-  historyItem: {
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    width: "100%",
-    padding: "4px 8px",
-    background: "transparent",
-    border: "none",
-    borderRadius: "var(--radius-sm)",
-    cursor: "pointer",
-    textAlign: "left" as const,
-  },
-  historyItemActive: {
-    background: "var(--bg-tertiary)",
-  },
-  historyTitle: {
-    fontFamily: "var(--font-ui)",
-    fontSize: "var(--font-size-xs)",
-    color: "var(--text-primary)",
-  },
-  historyStatus: {
-    fontFamily: "var(--font-mono)",
-    fontSize: 10,
-    fontWeight: 500,
-  },
-  loadingText: {
-    fontFamily: "var(--font-ui)",
-    fontSize: "var(--font-size-xs)",
-    color: "var(--text-secondary)",
-    margin: 0,
-    padding: "4px 8px",
   },
 };

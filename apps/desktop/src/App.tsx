@@ -1,4 +1,4 @@
-import { useEffect, useCallback } from "react";
+import { useEffect, useCallback, useRef } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useEngineStore } from "./stores/engine";
 import { useWorkspaceStore, type FsEntry } from "./stores/workspace";
@@ -22,10 +22,15 @@ import { ContextInspector } from "./components/ContextInspector/ContextInspector
 import { ApprovalDialog } from "./components/Approval/ApprovalDialog";
 import { CommandPalette } from "./components/CommandPalette/CommandPalette";
 import { SettingsModal } from "./components/Settings/SettingsModal";
+import { AppBar } from "./components/AppBar/AppBar";
+import { SearchPanel } from "./components/SearchPanel/SearchPanel";
+import { TerminalPanel } from "./components/Terminal/TerminalPanel";
+import { useTerminalStore } from "./stores/terminalStore";
 import { useSettingsStore } from "./stores/settingsStore";
 import { initApprovalListener } from "./stores/approvalStore";
 import { usePermissionStore } from "./stores/permissionStore";
 import { useIndexStore } from "./stores/indexStore";
+import { initOrchestrationListener } from "./stores/orchestrationStore";
 import { listen } from "@tauri-apps/api/event";
 import "./styles/global.css";
 
@@ -46,10 +51,11 @@ function toFsEntries(raw: RawFsEntry[]): FsEntry[] {
 }
 
 export function App() {
-  const { status, setStatus } = useEngineStore();
+  const { setStatus } = useEngineStore();
   const { rootPath, setRootPath, setFileTree, openTabs, activeTabPath, updateTabContent } =
     useWorkspaceStore();
-  const { startLoading, stopLoading, fileTreeVisible } = useUiStore();
+  const { startLoading, stopLoading, fileTreeVisible, sidebarPanel } = useUiStore();
+  const terminalVisible = useTerminalStore((s) => s.visible);
 
   const { handlePiEvent } = useStreamStore();
 
@@ -57,6 +63,7 @@ export function App() {
   useEffect(() => {
     let cancelled = false;
     initApprovalListener();
+    initOrchestrationListener();
     usePermissionStore.getState().load();
 
     // Subscribe to all Pi events and forward to stream store
@@ -169,13 +176,28 @@ export function App() {
       } else if (meta && e.key === ",") {
         e.preventDefault();
         useSettingsStore.getState().open();
+      } else if (meta && e.key === "0") {
+        e.preventDefault();
+        useUiStore.getState().showFileTree();
+        setTimeout(() => document.getElementById("file-tree")?.focus(), 50);
+      } else if (meta && e.key === "t") {
+        e.preventDefault();
+        useTerminalStore.getState().toggleVisible();
+      } else if (meta && e.key === "o") {
+        e.preventDefault();
+        handleOpenFolderRef.current();
+      } else if (meta && e.shiftKey && e.key === "f") {
+        e.preventDefault();
+        useUiStore.getState().setSidebarPanel("search");
+        setTimeout(() => document.getElementById("search-input")?.focus(), 50);
       }
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
 
-  // Register commands
+  // Register commands (ref declared after handleOpenFolder below)
+  const handleOpenFolderRef = useRef<() => Promise<void>>(null!);
   useEffect(() => {
     useCommandStore.getState().registerMany([
       {
@@ -183,7 +205,7 @@ export function App() {
         label: "Open Folder",
         category: "File",
         shortcut: "Cmd+O",
-        execute: () => handleOpenFolder(),
+        execute: () => handleOpenFolderRef.current(),
       },
       {
         id: "tide.toggleFileTree",
@@ -206,6 +228,34 @@ export function App() {
         category: "View",
         shortcut: "Cmd+Shift+P",
         execute: () => useCommandStore.getState().open(),
+      },
+      {
+        id: "tide.focusExplorer",
+        label: "Focus File Explorer",
+        category: "View",
+        shortcut: "Cmd+0",
+        execute: () => {
+          useUiStore.getState().showFileTree();
+          setTimeout(() => document.getElementById("file-tree")?.focus(), 50);
+        },
+      },
+      {
+        id: "tide.toggleTerminal",
+        label: "Toggle Terminal",
+        category: "View",
+        shortcut: "⌘T",
+        execute: () => useTerminalStore.getState().toggleVisible(),
+      },
+      {
+        id: "tide.searchInFiles",
+        label: "Search in Files",
+        category: "Search",
+        shortcut: "Cmd+Shift+F",
+        keywords: ["find", "grep", "replace"],
+        execute: () => {
+          useUiStore.getState().setSidebarPanel("search");
+          setTimeout(() => document.getElementById("search-input")?.focus(), 50);
+        },
       },
     ]);
   }, []);
@@ -237,30 +287,45 @@ export function App() {
     }
   }, [setRootPath, setFileTree, startLoading, stopLoading]);
 
+  // Keep ref to latest handleOpenFolder to avoid stale closures in command palette
+  useEffect(() => { handleOpenFolderRef.current = handleOpenFolder; }, [handleOpenFolder]);
+
   const activeTab = openTabs.find((t) => t.path === activeTabPath);
 
-  const statusColor =
-    status === "connected"
-      ? "var(--success)"
-      : status === "error"
-        ? "var(--error)"
-        : "var(--text-secondary)";
+  const editorContent = (
+    <div style={s.editorArea}>
+      <EditorTabs />
+      <div style={s.editorContent}>
+        {activeTab ? (
+          <MonacoEditor
+            content={activeTab.content}
+            language={activeTab.language}
+            path={activeTab.path}
+            readOnly={true}
+            onChange={(value) => updateTabContent(activeTab.path, value)}
+          />
+        ) : (
+          <div style={s.emptyEditor}>
+            <p>Open a file from the explorer</p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  const editorWithTerminal = terminalVisible ? (
+    <SplitPane direction="horizontal" initialSize={200} minSize={100} maxSize={500} side="end">
+      {editorContent}
+      <TerminalPanel />
+    </SplitPane>
+  ) : (
+    editorContent
+  );
 
   return (
     <div style={s.container}>
       <GlobalLoader />
-      {/* Top status bar */}
-      <div style={s.topBar}>
-        <span style={s.title}>Tide</span>
-        <span style={{ ...s.statusDot, background: statusColor }} />
-        <span style={s.statusText}>Pi: {status}</span>
-        <div style={{ flex: 1 }} />
-        {!rootPath && (
-          <button style={s.openBtn} onClick={handleOpenFolder}>
-            Open Folder
-          </button>
-        )}
-      </div>
+      <AppBar />
 
       {/* Main content area */}
       <div style={s.main}>
@@ -268,65 +333,57 @@ export function App() {
           fileTreeVisible ? (
             /* File Tree | Editor | Agent Panel */
             <SplitPane direction="vertical" initialSize={250} minSize={150} maxSize={500}>
-              {/* Left sidebar: File Tree */}
+              {/* Left sidebar: Icon Rail + Panel */}
               <div style={s.sidebar}>
-                <div style={s.sidebarHeader}>
-                  <span>Explorer</span>
-                  <button style={s.openBtn} onClick={handleOpenFolder} title="Open Folder">
-                    ...
-                  </button>
-                </div>
-                <FileTree />
-              </div>
-
-              {/* Editor + Agent Panel */}
-              <SplitPane direction="vertical" initialSize={350} minSize={250} maxSize={600} side="end">
-                {/* Center: Editor area */}
-                <div style={s.editorArea}>
-                  <EditorTabs />
-                  <div style={s.editorContent}>
-                    {activeTab ? (
-                      <MonacoEditor
-                        content={activeTab.content}
-                        language={activeTab.language}
-                        path={activeTab.path}
-                        readOnly={true}
-                        onChange={(value) => updateTabContent(activeTab.path, value)}
-                      />
-                    ) : (
-                      <div style={s.emptyEditor}>
-                        <p>Open a file from the explorer</p>
-                      </div>
-                    )}
+                <div style={s.sidebarInner}>
+                  {/* Icon rail */}
+                  <div style={s.iconRail}>
+                    <button
+                      style={{ ...s.iconRailBtn, ...(sidebarPanel === "explorer" ? s.iconRailBtnActive : {}) }}
+                      onClick={() => useUiStore.getState().setSidebarPanel("explorer")}
+                      title="Explorer (Cmd+0)"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <path d="M1 2h5l1 1h7v10H1V2z" stroke="currentColor" strokeWidth="1.2" fill="none" />
+                        <path d="M1 5h14" stroke="currentColor" strokeWidth="1.2" />
+                      </svg>
+                    </button>
+                    <button
+                      style={{ ...s.iconRailBtn, ...(sidebarPanel === "search" ? s.iconRailBtnActive : {}) }}
+                      onClick={() => useUiStore.getState().setSidebarPanel("search")}
+                      title="Search (Cmd+Shift+F)"
+                    >
+                      <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                        <circle cx="7" cy="7" r="4.5" stroke="currentColor" strokeWidth="1.2" />
+                        <path d="M10.5 10.5L14 14" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+                      </svg>
+                    </button>
+                  </div>
+                  {/* Panel content */}
+                  <div style={s.sidebarContent}>
+                    <div style={s.sidebarHeader}>
+                      <span>{sidebarPanel === "explorer" ? "Explorer" : "Search"}</span>
+                      {sidebarPanel === "explorer" && (
+                        <button style={s.openBtn} onClick={handleOpenFolder} title="Open Folder">
+                          ...
+                        </button>
+                      )}
+                    </div>
+                    {sidebarPanel === "explorer" ? <FileTree /> : <SearchPanel />}
                   </div>
                 </div>
+              </div>
 
-                {/* Right: Agent Panel */}
+              {/* Editor + Terminal + Agent Panel */}
+              <SplitPane direction="vertical" initialSize={350} minSize={250} maxSize={600} side="end">
+                {editorWithTerminal}
                 <AgentPanel />
               </SplitPane>
             </SplitPane>
           ) : (
-            /* Editor | Agent Panel (no file tree) */
+            /* Editor + Terminal | Agent Panel (no file tree) */
             <SplitPane direction="vertical" initialSize={350} minSize={250} maxSize={600} side="end">
-              <div style={s.editorArea}>
-                <EditorTabs />
-                <div style={s.editorContent}>
-                  {activeTab ? (
-                    <MonacoEditor
-                      content={activeTab.content}
-                      language={activeTab.language}
-                      path={activeTab.path}
-                      readOnly={true}
-                      onChange={(value) => updateTabContent(activeTab.path, value)}
-                    />
-                  ) : (
-                    <div style={s.emptyEditor}>
-                      <p>Open a file from the explorer</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-
+              {editorWithTerminal}
               <AgentPanel />
             </SplitPane>
           )
@@ -372,19 +429,6 @@ const s: Record<string, React.CSSProperties> = {
     background: "var(--bg-primary)",
     color: "var(--text-primary)",
   },
-  topBar: {
-    display: "flex",
-    alignItems: "center",
-    gap: 8,
-    height: "var(--status-bar-height)",
-    padding: "0 12px",
-    background: "var(--bg-tertiary)",
-    borderBottom: "1px solid var(--border)",
-    fontSize: "var(--font-size-sm)",
-  },
-  title: { fontWeight: 600, color: "var(--text-bright)" },
-  statusDot: { width: 6, height: 6, borderRadius: "50%", marginLeft: 8 },
-  statusText: { color: "var(--text-secondary)", fontSize: "var(--font-size-xs)" },
   openBtn: {
     padding: "2px 8px",
     fontFamily: "var(--font-ui)",
@@ -401,6 +445,46 @@ const s: Record<string, React.CSSProperties> = {
     flexDirection: "column",
     height: "100%",
     background: "var(--bg-secondary)",
+  },
+  sidebarInner: {
+    display: "flex",
+    flex: 1,
+    overflow: "hidden",
+  },
+  iconRail: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    gap: 2,
+    width: 32,
+    padding: "6px 0",
+    background: "var(--bg-secondary)",
+    borderRight: "1px solid var(--border)",
+    flexShrink: 0,
+  },
+  iconRailBtn: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    width: 28,
+    height: 28,
+    background: "transparent",
+    border: "none",
+    borderRadius: "var(--radius-sm)",
+    color: "var(--text-secondary)",
+    cursor: "pointer",
+  },
+  iconRailBtnActive: {
+    color: "var(--text-bright)",
+    borderLeft: "2px solid var(--accent)",
+    borderRadius: 0,
+  },
+  sidebarContent: {
+    display: "flex",
+    flexDirection: "column",
+    flex: 1,
+    minWidth: 0,
+    overflow: "hidden",
   },
   sidebarHeader: {
     display: "flex",

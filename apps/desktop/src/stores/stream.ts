@@ -4,6 +4,12 @@ import { useContextStore } from "./contextStore";
 import { useLogStore } from "./logStore";
 import { useWorkspaceStore } from "./workspace";
 import { getMessages, getPiState, getSessionStats, setSessionName } from "../lib/ipc";
+import { useOrchestrationStore } from "./orchestrationStore";
+
+/** Get current orchestration phase without triggering React re-renders. */
+function getOrcPhase() {
+  return useOrchestrationStore.getState().phase;
+}
 
 // ── Message Types ───────────────────────────────────────────
 
@@ -94,6 +100,7 @@ interface StreamState {
   contextWindow: number;
   hasAutoTitled: boolean;
   sessionStatus: SessionStatus;
+  _agentStartMsgCount: number;
 
   handlePiEvent: (event: PiEvent) => void;
   addUserMessage: (content: string) => void;
@@ -142,6 +149,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   contextWindow: 200000,
   hasAutoTitled: false,
   sessionStatus: "idle" as SessionStatus,
+  _agentStartMsgCount: 0,
 
   addUserMessage: (content: string) => {
     set((state) => ({
@@ -160,39 +168,63 @@ export const useStreamStore = create<StreamState>((set, get) => ({
   clearMessages: () => set({ messages: [], hasAutoTitled: false }),
 
   handlePiEvent: (event: PiEvent) => {
-    console.debug("[pi:event]", (event as any).type, JSON.stringify(event).slice(0, 200));
+    // Top-level event trace for debugging router ↔ model sync
+    if (event.type === "model_select" || event.type === "agent_start" || event.type === "agent_end" || event.type === "message_end") {
+      console.debug(`[Tide:event] ${event.type}`, event.type === "model_select" ? event : "");
+    }
+
     switch (event.type) {
       case "agent_start": {
-        const { modelName, modelProvider, modelId, thinkingLevel } = get();
-        console.log(`[Tide] Agent started — model: ${modelProvider}/${modelId} (${modelName}), thinking: ${thinkingLevel}`);
+        console.debug("[Tide:event] agent_start — msgCount:", get().messages.length, "model:", get().modelName);
         const thinkingId = nextId();
         set((state) => ({
           agentActive: true,
           isStreaming: true,
+          _agentStartMsgCount: state.messages.length,
           messages: [
             ...state.messages,
             { role: "thinking" as const, id: thinkingId, timestamp: Date.now() },
           ],
         }));
+        // Proactively refresh model info — the router extension may have called
+        // setModel() in before_agent_start, but Pi may not emit model_select.
+        getPiState().catch(() => {});
         break;
       }
 
       case "agent_end": {
-        console.log("[Tide] Agent ended — setting isStreaming=false, agentActive=false");
+        const startCount = get()._agentStartMsgCount ?? 0;
         // Remove thinking indicator, mark current assistant message as done
-        set((state) => ({
-          agentActive: false,
-          isStreaming: false,
-          messages: state.messages
+        set((state) => {
+          const cleaned = state.messages
             .filter((m) => m.role !== "thinking")
             .map((m) =>
               m.role === "assistant" && m.streaming
                 ? { ...m, streaming: false }
                 : m,
-            ),
-        }));
+            );
+          // Detect silent failure: no assistant text received during this agent turn
+          const hasResponse = cleaned.slice(startCount).some(
+            (m) => m.role === "assistant" && (m as AssistantMessage).content.trim().length > 0
+          );
+          console.debug("[Tide:event] agent_end — msgCount:", cleaned.length, "hasResponse:", hasResponse);
+          if (!hasResponse && startCount > 0) {
+            console.warn("[Tide] No assistant response received from model — possible silent failure");
+            cleaned.push({
+              role: "system" as const,
+              id: nextId(),
+              content: "No response received from model. The model may have returned an empty response or the connection was interrupted.",
+              timestamp: Date.now(),
+              icon: "info" as const,
+            });
+          }
+          return {
+            agentActive: false,
+            isStreaming: false,
+            messages: cleaned,
+          };
+        });
         // Refresh model info + context usage after agent completes
-        // (model may have been changed by the router extension during before_agent_start)
         getPiState().catch(() => {});
         getSessionStats().catch(() => {});
         // Auto-title: generate from first user message if no name set yet
@@ -210,21 +242,17 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       case "message_update": {
         const raw = event as any;
         const ame = raw.assistantMessageEvent;
-        // Debug: log the full event shape to find text deltas
-        if (!ame) {
-          console.debug("[pi:message_update] no assistantMessageEvent, keys:", Object.keys(raw));
-        } else if (ame.type !== "text_delta") {
-          console.debug("[pi:message_update] ame.type:", ame.type, "keys:", Object.keys(ame));
-        }
         // Try multiple possible shapes for text content
         const delta = ame?.type === "text_delta" ? (ame.delta ?? ame.text)
           : ame?.type === "content_block_delta" ? (ame.delta?.text ?? ame.text)
           : ame?.text ?? ame?.delta
           ?? raw.text ?? raw.delta ?? raw.content ?? null;
-        if (typeof delta !== "string" && ame) {
-          console.warn("[pi:message_update] Could not extract delta. Event:", JSON.stringify(event).slice(0, 500));
-        }
         if (typeof delta === "string") {
+          // Log first delta only to confirm text is arriving
+          const isFirst = !get().messages.some(m => m.role === "assistant" && (m as AssistantMessage).streaming);
+          if (isFirst) {
+            console.debug(`[Tide:event] message_update — first delta, len=${delta.length}, type=${ame?.type || "raw"}`);
+          }
           set((state) => {
             const msgs = [...state.messages];
             // Remove thinking indicator when first text arrives
@@ -324,8 +352,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
         const e = event as any;
         const cmd = e.command as string;
 
-        // Debug: log all response events
-        console.debug("[pi:response]", cmd, e.success, e.data ? Object.keys(e.data) : "no-data");
 
         switch (cmd) {
           case "get_available_models": {
@@ -336,16 +362,16 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                   name: String(m.name || m.id || ""),
                   provider: String(m.provider || "unknown"),
                 }));
-              console.debug("[pi:models] parsed:", models.length, "models (filtered)");
               set({ availableModels: models });
             } else if (e.data && !e.success) {
-              console.warn("[pi:models] error:", e.error);
+              console.warn("[Tide] Failed to load models:", e.error);
             }
             break;
           }
 
           case "get_state": {
             const updates: Partial<StreamState> = {};
+            console.debug("[Tide:response] get_state — model:", e.data?.model?.id || e.data?.model, "session:", e.data?.sessionFile || e.data?.sessionId);
 
             if (e.data?.model) {
               const m = e.data.model;
@@ -359,7 +385,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               if (typeof m === "object" && m.contextWindow) {
                 updates.contextWindow = Number(m.contextWindow);
               }
-              console.log(`[Tide] Current model: ${provider}/${id} → "${name}" (ctx: ${(updates as any).contextWindow ?? "unchanged"})`);
+              console.debug(`[Tide] Model: ${provider}/${id} "${name}" (ctx: ${(updates as any).contextWindow ?? "unchanged"})`);
             }
             if (e.data?.thinkingLevel) {
               updates.thinkingLevel = e.data.thinkingLevel as ThinkingLevel;
@@ -374,9 +400,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               if (lastSlash > 0) {
                 updates.sessionDir = sf.substring(0, lastSlash);
               }
-              console.log(`[Tide] get_state sessionFile: ${sf}, derived sessionDir: ${updates.sessionDir}`);
+              console.debug(`[Tide] Session: ${sf}`);
             } else {
-              console.log(`[Tide] get_state: no sessionFile in response. data keys:`, Object.keys(e.data || {}));
             }
             if (e.data?.isCompacting != null) updates.isCompacting = e.data.isCompacting;
 
@@ -400,6 +425,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           }
 
           case "set_model": {
+            console.debug("[Tide:response] set_model — success:", e.success, "data:", e.data);
             if (e.success && e.data) {
               const m = e.data;
               const name = typeof m === "string" ? m : String(m.name || m.id || "unknown");
@@ -420,7 +446,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                   useContextStore.getState().updateFromPiState(stats.totalTokens, updates.contextWindow);
                 }
               }
-              console.log(`[Tide] Model changed: ${prevProvider}/${prevModel} → ${provider}/${id} ("${name}", ctx: ${updates.contextWindow ?? "unchanged"})`);
+              console.log(`[Tide] Model switched: ${prevProvider}/${prevModel} → ${provider}/${id}`);
               // Insert system message in chat when model changes
               if (prevModel && prevModel !== name) {
                 set((state) => ({
@@ -443,7 +469,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           }
 
           case "set_thinking_level": {
-            console.log("[Tide] set_thinking_level response:", e.success, e.data);
+            console.debug("[Tide] Thinking level updated:", e.data);
             if (e.success && e.data?.level) {
               set({ thinkingLevel: e.data.level as ThinkingLevel });
             }
@@ -483,15 +509,29 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
           case "new_session": {
             if (e.success) {
-              set({
-                messages: [],
-                sessionName: "",
-                sessionStats: {},
-                hasAutoTitled: false,
-                sessionStatus: "active",
-                sessionId: e.data?.sessionId || e.data?.sessionPath || "",
-              });
-              getSessionStats().catch(() => {});
+              // During orchestration, don't clear messages — the orchestrator
+              // creates fresh sessions for each build step internally.
+              const orcPhase = getOrcPhase();
+              const isOrchestrating = orcPhase !== "idle" && orcPhase !== "complete" && orcPhase !== "failed";
+
+              if (isOrchestrating) {
+                // Just update session ID silently
+                set({
+                  sessionId: e.data?.sessionId || e.data?.sessionPath || "",
+                });
+              } else {
+                set({
+                  messages: [],
+                  sessionName: "",
+                  sessionStats: {},
+                  hasAutoTitled: false,
+                  sessionStatus: "active",
+                  sessionId: e.data?.sessionId || e.data?.sessionPath || "",
+                });
+                // Reset context indicator immediately (fresh session = 0 tokens)
+                useContextStore.getState().updateFromPiState(0, get().contextWindow);
+                getSessionStats().catch(() => {});
+              }
             }
             break;
           }
@@ -505,6 +545,8 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                 hasAutoTitled: false,
                 sessionStatus: "loading",
               });
+              // Reset context immediately; getSessionStats will correct it
+              useContextStore.getState().updateFromPiState(0, get().contextWindow);
               // Re-fetch messages for the switched session
               getMessages().catch(() => {});
               getSessionStats().catch(() => {});
@@ -552,7 +594,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                   }
                 }
                 if (restored.length > 0) {
-                  console.log(`[Tide] Restored ${restored.length} messages from session`);
+                  console.debug(`[Tide] Restored ${restored.length} messages`);
                   // If session already has a name, mark auto-titled to prevent re-titling
                   const alreadyNamed = !!get().sessionName;
                   set({ messages: restored, sessionStatus: "active", hasAutoTitled: alreadyNamed });
@@ -560,6 +602,18 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                   set({ sessionStatus: "active" });
                 }
               }
+            }
+            break;
+          }
+
+          case "compact": {
+            set({ isCompacting: false });
+            if (e.success) {
+              console.log("[Tide] Context compacted successfully");
+              // Refresh session stats to get updated token count
+              getSessionStats().catch(() => {});
+            } else {
+              console.error("[Tide] Compact failed:", e.error);
             }
             break;
           }
@@ -580,7 +634,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               }));
               if (models.length > 0) set({ availableModels: models });
             }
-            console.debug("[stream] Response:", cmd || "no-command", e.success, JSON.stringify(e.data)?.slice(0, 200));
             break;
           }
         }
@@ -593,12 +646,11 @@ export const useStreamStore = create<StreamState>((set, get) => ({
       }
 
       case "message_end": {
-        // Some models (e.g. codex) don't stream text_delta — the full text
-        // arrives in message_end.message.content instead.
+        // Some models don't stream text_delta — the full text arrives here.
         // If text was already streamed via message_update, skip to avoid duplication.
         const endMsg = (event as any).message;
+        console.debug("[Tide:event] message_end — hasMessage:", !!endMsg, "role:", endMsg?.role);
         if (endMsg) {
-          // Extract text from message content array or string
           let text = "";
           if (typeof endMsg.content === "string") {
             text = endMsg.content;
@@ -611,31 +663,37 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               }
             }
           }
-          // Only add if there's actual text and it's an assistant message
           if (text.trim() && endMsg.role === "assistant") {
-            console.log("[pi:message_end] extracted text:", text.slice(0, 200));
             set((state) => {
               const msgs = [...state.messages];
               // Remove thinking indicator
               const thinkingIdx = msgs.findIndex((m) => m.role === "thinking");
               if (thinkingIdx !== -1) msgs.splice(thinkingIdx, 1);
-              const lastMsg = msgs[msgs.length - 1];
-              if (lastMsg?.role === "assistant" && lastMsg.streaming) {
-                // Text was already streamed via message_update — only use
-                // message_end content if the streamed message is empty
-                // (non-streaming models like codex)
-                if (!lastMsg.content.trim()) {
-                  msgs[msgs.length - 1] = { ...lastMsg, content: text };
+              // Find the last assistant message (may not be at the very end
+              // if tool_call messages were inserted after it)
+              let lastAssistantIdx = -1;
+              for (let i = msgs.length - 1; i >= 0; i--) {
+                if (msgs[i].role === "assistant" && (msgs[i] as AssistantMessage).streaming) {
+                  lastAssistantIdx = i;
+                  break;
                 }
-                // else: skip — content already streamed
+              }
+              if (lastAssistantIdx !== -1) {
+                const lastAssistant = msgs[lastAssistantIdx] as AssistantMessage;
+                if (!lastAssistant.content.trim()) {
+                  // Empty streaming message — fill with message_end text
+                  msgs[lastAssistantIdx] = { ...lastAssistant, content: text };
+                }
+                // else: already has content from message_update — skip
               } else {
-                // No streaming message exists — create one (codex/non-streaming path)
+                // No streaming assistant message — create one (non-streaming model path)
                 msgs.push({
                   role: "assistant" as const,
                   id: nextId(),
                   content: text,
                   timestamp: Date.now(),
                   streaming: true,
+                  modelName: get().modelName || undefined,
                 });
               }
               return { messages: msgs };
@@ -647,12 +705,10 @@ export const useStreamStore = create<StreamState>((set, get) => ({
 
       case "turn_start": {
         set((state) => ({ turnCount: state.turnCount + 1 }));
-        console.debug("[pi] Turn started:", get().turnCount);
         break;
       }
 
       case "turn_end": {
-        console.debug("[pi] Turn ended");
         break;
       }
 
@@ -700,7 +756,18 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           const updates: Partial<StreamState> = { modelName: name, modelProvider: provider, modelId: id };
           if (model.contextWindow) updates.contextWindow = Number(model.contextWindow);
           set(updates);
-          console.log(`[Tide] Model selected: ${provider}/${id} ("${name}", source: ${e.source || "extension"})`);
+          console.debug(`[Tide] model_select: ${prevModel} → ${provider}/${id} "${name}"`);
+
+          // Fix 1: Update modelName on any currently-streaming assistant message
+          // so the badge reflects the routed model, not the old one
+          set((state) => ({
+            messages: state.messages.map((m) =>
+              m.role === "assistant" && (m as AssistantMessage).streaming
+                ? { ...m, modelName: name }
+                : m
+            ),
+          }));
+
           if (prevModel && prevModel !== name) {
             set((state) => ({
               messages: [
@@ -722,28 +789,18 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               useContextStore.getState().updateFromPiState(stats.totalTokens, updates.contextWindow);
             }
           }
+          // Fix 3: Proactively refresh full state to ensure contextWindow is synced
+          getPiState().catch(() => {});
         }
         break;
       }
 
       case "tool_execution_update": {
-        // Real-time progress for long-running tools
-        const e = event as any;
-        const callId = e.toolCallId || e.tool_call_id || "";
-        if (callId) {
-          console.debug("[pi] Tool update:", callId, e);
-        }
         break;
       }
 
-      default: {
-        // Log unhandled event types for debugging
-        const evType = (event as any).type;
-        if (evType) {
-          console.warn("[pi] Unhandled event:", evType, JSON.stringify(event).slice(0, 300));
-        }
+      default:
         break;
-      }
     }
   },
 }));

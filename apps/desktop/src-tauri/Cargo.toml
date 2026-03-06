@@ -29,6 +29,8 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 notify = { version = "7", features = ["macos_kqueue"] }
 xxhash-rust = { version = "0.8", features = ["xxh3"] }
 ignore = "0.4"
+regex = "1"
+portable-pty = "0.8"
 
 [features]
 default = ["custom-protocol"]

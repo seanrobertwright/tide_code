@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { useApprovalStore } from "./approvalStore";
-import { plansList } from "../lib/ipc";
+import { plansList, planDelete } from "../lib/ipc";
 
 // ── Types ───────────────────────────────────────────────────
 
@@ -10,6 +10,10 @@ export interface PlanStep {
   description: string;
   status: "pending" | "in_progress" | "completed" | "skipped";
   files?: string[];
+  dependencies?: string[];
+  expectedOutcome?: string;
+  summary?: string;
+  completedAt?: string;
 }
 
 export interface Plan {
@@ -30,6 +34,7 @@ interface PlanState {
 
   updateFromPiStatus: (raw: string) => void;
   loadPlans: () => Promise<void>;
+  deletePlan: (slug: string) => Promise<void>;
   clearActivePlan: () => void;
 }
 
@@ -57,6 +62,19 @@ export const usePlanStore = create<PlanState>((set) => ({
       set({ plans, loading: false });
     } catch {
       set({ loading: false });
+    }
+  },
+
+  deletePlan: async (slug: string) => {
+    try {
+      await planDelete(slug);
+      set((state) => {
+        const plans = state.plans.filter((p) => p.slug !== slug);
+        const activePlan = state.activePlan?.slug === slug ? null : state.activePlan;
+        return { plans, activePlan };
+      });
+    } catch (e) {
+      console.error("Failed to delete plan:", e);
     }
   },
 

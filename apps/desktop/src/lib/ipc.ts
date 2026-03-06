@@ -17,6 +17,12 @@ export async function sendPrompt(
   await invoke("send_prompt", { text, images: images ?? null });
 }
 
+/** Start an orchestrated pipeline: Route → Plan → Build → Review.
+ *  Progress emitted as `orchestration_event` Tauri events. */
+export async function orchestrate(prompt: string): Promise<void> {
+  await invoke("orchestrate", { prompt });
+}
+
 /** Steer: redirect the agent mid-run with new instructions (after current tool finishes). */
 export async function steerAgent(message: string): Promise<void> {
   await invoke("steer_agent", { message });
@@ -198,6 +204,97 @@ export async function fsReadFile(
   return invoke("fs_read_file", { path });
 }
 
+// ── Search & Replace ───────────────────────────────────────
+
+export interface SearchMatch {
+  line: number;
+  column: number;
+  length: number;
+  text: string;
+}
+
+export interface SearchFileResult {
+  file: string;
+  matches: SearchMatch[];
+}
+
+export interface ReplaceAllResult {
+  filesChanged: number;
+  totalReplacements: number;
+}
+
+/** Search across files in the workspace. */
+export async function fsSearch(params: {
+  query: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  includeGlob?: string;
+  excludeGlob?: string;
+  maxResults?: number;
+}): Promise<SearchFileResult[]> {
+  return invoke<SearchFileResult[]>("fs_search", {
+    query: params.query,
+    isRegex: params.isRegex,
+    caseSensitive: params.caseSensitive,
+    wholeWord: params.wholeWord,
+    includeGlob: params.includeGlob ?? null,
+    excludeGlob: params.excludeGlob ?? null,
+    maxResults: params.maxResults ?? null,
+  });
+}
+
+/** Replace all occurrences in a single file. Returns replacement count. */
+export async function fsReplaceInFile(params: {
+  path: string;
+  search: string;
+  replace: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+}): Promise<number> {
+  return invoke<number>("fs_replace_in_file", params);
+}
+
+/** Replace across all matching files. */
+export async function fsReplaceAll(params: {
+  search: string;
+  replace: string;
+  isRegex: boolean;
+  caseSensitive: boolean;
+  wholeWord: boolean;
+  includeGlob?: string;
+  excludeGlob?: string;
+}): Promise<ReplaceAllResult> {
+  return invoke<ReplaceAllResult>("fs_replace_all", {
+    ...params,
+    includeGlob: params.includeGlob ?? null,
+    excludeGlob: params.excludeGlob ?? null,
+  });
+}
+
+// ── File CRUD ──────────────────────────────────────────────
+
+/** Create a new file. */
+export async function fsCreateFile(path: string, content?: string): Promise<void> {
+  await invoke("fs_create_file", { path, content: content ?? null });
+}
+
+/** Create a new directory (recursive). */
+export async function fsCreateDir(path: string): Promise<void> {
+  await invoke("fs_create_dir", { path });
+}
+
+/** Rename/move a file or directory. */
+export async function fsRename(oldPath: string, newPath: string): Promise<void> {
+  await invoke("fs_rename", { oldPath, newPath });
+}
+
+/** Delete a file or directory. */
+export async function fsDelete(path: string): Promise<void> {
+  await invoke("fs_delete", { path });
+}
+
 // ── Region Tags ────────────────────────────────────────────
 
 /** Load all region tags from .tide/tags/tags.json */
@@ -232,6 +329,22 @@ export async function plansList(): Promise<unknown[]> {
 /** Read a single plan by slug */
 export async function planRead(slug: string): Promise<unknown> {
   return invoke<unknown>("plan_read", { slug });
+}
+
+/** Delete a plan by slug */
+export async function planDelete(slug: string): Promise<void> {
+  await invoke("plan_delete", { slug });
+}
+
+// ── Git ─────────────────────────────────────────────────────
+
+export interface ChangedFile {
+  path: string;
+  status: "modified" | "added" | "deleted" | "renamed" | "untracked";
+}
+
+export async function gitChangedFiles(): Promise<ChangedFile[]> {
+  return invoke<ChangedFile[]>("git_changed_files");
 }
 
 // ── Code Index ──────────────────────────────────────────────
@@ -353,4 +466,26 @@ export async function keychainDeleteKey(provider: string): Promise<void> {
 
 export async function keychainHasKey(provider: string): Promise<boolean> {
   return invoke<boolean>("keychain_has_key", { provider });
+}
+
+// ── Terminal PTY ────────────────────────────────────────────
+
+export async function ptyCreate(cwd?: string): Promise<string> {
+  return invoke<string>("pty_create", { cwd: cwd ?? null });
+}
+
+export async function ptyAttach(ptyId: string): Promise<void> {
+  await invoke("pty_attach", { ptyId });
+}
+
+export async function ptyWrite(ptyId: string, data: string): Promise<void> {
+  await invoke("pty_write", { ptyId, data });
+}
+
+export async function ptyResize(ptyId: string, cols: number, rows: number): Promise<void> {
+  await invoke("pty_resize", { ptyId, cols, rows });
+}
+
+export async function ptyKill(ptyId: string): Promise<void> {
+  await invoke("pty_kill", { ptyId });
 }

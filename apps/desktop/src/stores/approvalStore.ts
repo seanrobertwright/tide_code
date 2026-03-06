@@ -45,6 +45,13 @@ export interface NotifyRequest {
   timestamp: number;
 }
 
+export interface ClarifyQuestion {
+  id: string;
+  question: string;
+  options: Array<{ value: string; label: string; description?: string }>;
+  allowFreeText?: boolean;
+}
+
 export type UiRequest = ConfirmRequest | SelectRequest | InputRequest | EditorRequest;
 
 // ── Store ──────────────────────────────────────────────────
@@ -55,10 +62,15 @@ interface ApprovalState {
   notifications: NotifyRequest[];
   piStatus: Record<string, string>;
 
+  // Clarify Q&A state
+  clarifyQuestions: ClarifyQuestion[] | null;
+  clarifyInputRequestId: string | null;
+
   addRequest: (req: UiRequest) => void;
   respond: (requestId: string, response: Record<string, unknown>) => Promise<void>;
   dismissNotification: (id: string) => void;
   setPiStatus: (id: string, text: string) => void;
+  respondClarify: (answers: Record<string, string>) => Promise<void>;
 
   // Legacy compat
   currentApproval: UiRequest | null;
@@ -72,6 +84,8 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
   currentRequest: null,
   notifications: [],
   piStatus: {},
+  clarifyQuestions: null,
+  clarifyInputRequestId: null,
 
   addRequest: (req: UiRequest) => {
     set((state) => {
@@ -114,6 +128,17 @@ export const useApprovalStore = create<ApprovalState>((set, get) => ({
     set((state) => ({
       piStatus: { ...state.piStatus, [id]: text },
     }));
+  },
+
+  respondClarify: async (answers: Record<string, string>) => {
+    const requestId = get().clarifyInputRequestId;
+    if (!requestId) return;
+    try {
+      await respondUiRequest(requestId, { value: JSON.stringify(answers) });
+    } catch (err) {
+      console.error("[piui] Failed to respond to clarify:", err);
+    }
+    set({ clarifyQuestions: null, clarifyInputRequestId: null });
   },
 
   // Legacy compat
@@ -200,6 +225,13 @@ export function initApprovalListener(): void {
       }
 
       case "input": {
+        // If we're in clarify mode, capture the input request ID instead of showing a modal
+        const currentClarify = useApprovalStore.getState().clarifyQuestions;
+        if (currentClarify && (event.title === "Plan Clarification" || payload.title === "Plan Clarification")) {
+          useApprovalStore.setState({ clarifyInputRequestId: event.id });
+          break;
+        }
+
         store.addRequest({
           method: "input",
           requestId: event.id,
@@ -245,8 +277,21 @@ export function initApprovalListener(): void {
       }
 
       case "setStatus": {
-        const statusId = payload.id || payload.statusId || "default";
-        store.setPiStatus(statusId, payload.status || payload.text || "");
+        const statusId = payload.statusKey || payload.id || payload.statusId || "default";
+        const statusText = payload.statusText ?? payload.status ?? payload.text ?? "";
+        store.setPiStatus(statusId, statusText);
+
+        // Handle clarify status updates
+        if (statusId === "clarify") {
+          if (statusText) {
+            try {
+              const data = JSON.parse(statusText);
+              useApprovalStore.setState({ clarifyQuestions: data.questions || null });
+            } catch { /* ignore */ }
+          } else {
+            useApprovalStore.setState({ clarifyQuestions: null, clarifyInputRequestId: null });
+          }
+        }
         break;
       }
 

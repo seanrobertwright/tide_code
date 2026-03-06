@@ -148,7 +148,7 @@ function loadRouterConfig(cwd: string): RouterConfig {
       return JSON.parse(fs.readFileSync(configPath, "utf-8"));
     }
   } catch { /* ignore */ }
-  return { enabled: true };
+  return { enabled: true, autoSwitch: true };
 }
 
 // ── Session-Based Routing State ─────────────────────────────
@@ -178,7 +178,10 @@ export default function tideRouter(pi: ExtensionAPI) {
     }
 
     const prompt = event.prompt || "";
-    if (!prompt.trim()) return;
+    if (!prompt.trim()) {
+      log("Empty prompt, skipping routing");
+      return;
+    }
 
     const { tier, reason } = classifyPrompt(prompt, ctx.cwd);
     log(`Classified as ${tier}: ${reason}`);
@@ -197,7 +200,7 @@ export default function tideRouter(pi: ExtensionAPI) {
     if (currentRouterState) {
       // Same session — skip routing, keep current model
       if (sessionId && currentRouterState.sessionId === sessionId) {
-        log(`Already routed for this session (${currentRouterState.tier} → ${currentRouterState.routedModel.provider}/${currentRouterState.routedModel.id}), skipping`);
+        log(`Skip: already routed this session (${currentRouterState.tier} → ${currentRouterState.routedModel.provider}/${currentRouterState.routedModel.id})`);
         return;
       }
       // No session ID available — check if model matches what we routed
@@ -205,14 +208,16 @@ export default function tideRouter(pi: ExtensionAPI) {
         const current = ctx.model;
         if (current && current.provider === currentRouterState.routedModel.provider
             && current.id === currentRouterState.routedModel.id) {
-          log(`Already on routed model ${current.provider}/${current.id}, skipping`);
+          log(`Skip: already on routed model ${current.provider}/${current.id}`);
           return;
         }
+        log(`No sessionId, model mismatch (current: ${current?.provider}/${current?.id}, routed: ${currentRouterState.routedModel.provider}/${currentRouterState.routedModel.id})`);
       }
     }
 
     // ── Find target model ─────────────────────────────────
     const available = ctx.modelRegistry.getAvailable();
+    log(`Model registry: ${available.length} available models`);
     const chatModels = available.filter((m) => {
       const lower = m.id.toLowerCase();
       return !EXCLUDED_MODEL_PATTERNS.some((p) => lower.includes(p));
@@ -222,6 +227,7 @@ export default function tideRouter(pi: ExtensionAPI) {
       log("No available chat models, skipping routing");
       return;
     }
+    log(`Chat models: ${chatModels.map(m => `${m.provider}/${m.id}`).join(", ")}`);
 
     // Check for explicit tier→model mapping
     const explicitMapping = config.tierModels?.[tier];
@@ -263,16 +269,18 @@ export default function tideRouter(pi: ExtensionAPI) {
     }
 
     // ── Switch model ──────────────────────────────────────
+    const currentModel = ctx.model;
+    log(`Switching: ${currentModel?.provider}/${currentModel?.id} → ${target.provider}/${target.id} (tier: ${tier})`);
     try {
       const success = await pi.setModel(target);
       if (success) {
-        log(`Switched to ${target.provider}/${target.id} for ${tier} tier`);
+        log(`✓ Switched to ${target.provider}/${target.id} for ${tier} tier`);
         currentRouterState = { sessionId, routedModel: { provider: target.provider, id: target.id }, tier };
       } else {
-        log(`Failed to switch to ${target.provider}/${target.id} (no API key?)`);
+        log(`✗ Failed to switch to ${target.provider}/${target.id} (setModel returned false — no API key?)`);
       }
     } catch (err) {
-      log(`Error switching model: ${err}`);
+      log(`✗ Error switching model: ${err}`);
     }
   });
 }
