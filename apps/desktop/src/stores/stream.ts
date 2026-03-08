@@ -300,9 +300,26 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           _emptyRetryCount: 0,
         });
 
-        // Refresh model info + context usage after agent completes
+        // Refresh model info + context usage + category breakdown after agent completes
         getPiState().catch(() => {});
         getSessionStats().catch(() => {});
+        useContextStore.getState().refreshCategories();
+
+        // Auto-compact if enabled and usage exceeds threshold
+        {
+          const ctxState = useContextStore.getState();
+          if (ctxState.autoCompactEnabled && ctxState.breakdown) {
+            const usage = ctxState.breakdown.usagePercent;
+            if (usage >= ctxState.autoCompactThreshold) {
+              console.log(`[Tide] Auto-compacting context (usage: ${Math.round(usage * 100)}%)`);
+              import("../lib/ipc").then(({ compactContext }) => {
+                ctxState.setPreCompactTokens(ctxState.breakdown!.totalTokens);
+                set({ isCompacting: true });
+                compactContext().catch(() => set({ isCompacting: false }));
+              });
+            }
+          }
+        }
         // Auto-title: generate from first user message if no name set yet
         if (!get().hasAutoTitled && !get().sessionName) {
           const firstUserMsg = get().messages.find(m => m.role === "user");
@@ -426,6 +443,9 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               : m,
           );
 
+          // Extract changed file path for tab reload and execution summary
+          const changedPath = extractChangedFilePath(toolName, (updatedMessages.find((m) => m.role === "tool_call" && (m as ToolCallMessage).toolCallId === callId) as ToolCallMessage | undefined)?.argsJson);
+
           // Attach execution summary to the latest assistant message for better UX clarity
           const assistantIdx = [...updatedMessages].reverse().findIndex((m) => m.role === "assistant");
           if (assistantIdx !== -1) {
@@ -435,7 +455,6 @@ export const useStreamStore = create<StreamState>((set, get) => ({
             const isFileMutating = ["write", "edit", "create", "delete", "rename", "move"].some((t) => lower.includes(t));
             const didSucceed = !e.error;
 
-            const changedPath = extractChangedFilePath(toolName, (updatedMessages.find((m) => m.role === "tool_call" && (m as ToolCallMessage).toolCallId === callId) as ToolCallMessage | undefined)?.argsJson);
             const prevFiles = assistant.changedFiles ?? [];
             const nextFiles = changedPath && !prevFiles.includes(changedPath) ? [...prevFiles, changedPath] : prevFiles;
 
@@ -458,9 +477,13 @@ export const useStreamStore = create<StreamState>((set, get) => ({
           error: e.error,
         });
 
-        // Refresh file tree when file-modifying tools complete
+        // Refresh file tree and reload open tabs when file-modifying tools complete
         if (["write", "edit", "create", "delete", "rename", "move"].some(t => toolName.toLowerCase().includes(t))) {
           useWorkspaceStore.getState().refreshFileTree();
+          // Extract changed path from the tool call args for targeted tab reload
+          const toolMsg = get().messages.find((m) => m.role === "tool_call" && (m as ToolCallMessage).toolCallId === callId) as ToolCallMessage | undefined;
+          const filePath = extractChangedFilePath(toolName, toolMsg?.argsJson);
+          useWorkspaceStore.getState().reloadTabsFromDisk(filePath);
         }
         break;
       }
@@ -530,9 +553,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
             // Update context indicator with real data
             if (updates.contextWindow) {
               const stats = get().sessionStats;
-              if (stats.totalTokens) {
-                useContextStore.getState().updateFromPiState(stats.totalTokens, updates.contextWindow);
-              }
+              useContextStore.getState().updateFromPiState(stats.totalTokens || 0, updates.contextWindow);
             }
             break;
           }
@@ -644,6 +665,7 @@ export const useStreamStore = create<StreamState>((set, get) => ({
                 });
                 // Reset context indicator immediately (fresh session = 0 tokens)
                 useContextStore.getState().updateFromPiState(0, get().contextWindow);
+                useContextStore.setState({ warningDismissedAt: 0 });
                 getSessionStats().catch(() => {});
               }
             }
@@ -665,9 +687,16 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               });
               // Reset context immediately; getSessionStats will correct it
               useContextStore.getState().updateFromPiState(0, get().contextWindow);
-              // Re-fetch messages for the switched session
+              // Re-fetch messages, stats, and category breakdown for the switched session
               getMessages().catch(() => {});
               getSessionStats().catch(() => {});
+              // Refresh Pi state after a brief delay to get authoritative context usage
+              setTimeout(() => {
+                getPiState().catch(() => {});
+                useContextStore.getState().refreshCategories();
+              }, 300);
+              // Reset warning state for new session
+              useContextStore.setState({ warningDismissedAt: 0 });
             }
             break;
           }
@@ -733,6 +762,22 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               console.log("[Tide] Context compacted successfully");
               // Refresh session stats to get updated token count
               getSessionStats().catch(() => {});
+              // Show before/after feedback
+              const ctxState = useContextStore.getState();
+              const pre = ctxState.preCompactTokens;
+              if (pre && pre > 0) {
+                // Wait for stats to update, then compute savings
+                setTimeout(() => {
+                  const post = useContextStore.getState().breakdown?.totalTokens ?? 0;
+                  ctxState.setPostCompactTokens(post);
+                  if (post < pre) {
+                    const savedPct = Math.round((1 - post / pre) * 100);
+                    import("./toastStore").then(({ showSuccess }) => {
+                      showSuccess(`Compacted: ${Math.round(pre / 1000)}K → ${Math.round(post / 1000)}K tokens (saved ${savedPct}%)`);
+                    });
+                  }
+                }, 1500);
+              }
             } else {
               console.error("[Tide] Compact failed:", e.error);
             }
