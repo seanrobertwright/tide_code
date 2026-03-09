@@ -7,7 +7,7 @@
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
     "beforeBuildCommand": "pnpm build",
-    "beforeDevCommand": "lsof -ti:5173 | xargs kill -9 2>/dev/null; pnpm dev"
+    "beforeDevCommand": "pnpm dev"
   },
   "app": {
     "windows": [

@@ -7,8 +7,7 @@ static STORE: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
 /// Get the path to the encrypted keys file.
 fn keys_file() -> PathBuf {
     // Use ~/.tide/keys.json (user-level, not per-project)
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let dir = PathBuf::from(home).join(".tide");
+    let dir = crate::tide_home_dir().join(".tide");
     let _ = std::fs::create_dir_all(&dir);
     dir.join("keys.json")
 }

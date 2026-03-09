@@ -13,6 +13,12 @@ use tauri::{Emitter, Manager};
 use tokio::sync::{Mutex, Notify};
 use std::sync::Mutex as StdMutex;
 
+/// Cross-platform home directory helper. Uses the `dirs` crate so it works
+/// on macOS (`$HOME`), Windows (`USERPROFILE` / `FOLDERID_Profile`), and Linux.
+fn tide_home_dir() -> std::path::PathBuf {
+    dirs::home_dir().expect("Could not determine home directory")
+}
+
 pub struct AppState {
     pub pi: Arc<Mutex<Option<PiConnection>>>,
     pub workspace_root: Arc<Mutex<Option<String>>>,
@@ -330,8 +336,7 @@ async fn list_sessions(
     // 2. Fall back to ~/.pi/agent/sessions/ and scan all workspace subdirectories
     //    Pi stores sessions in ~/.pi/agent/sessions/{workspace-slug}/ where
     //    the slug is the CWD path with "/" replaced by "-" (e.g. --Users-mac-foo--)
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let sessions_root = std::path::PathBuf::from(&home).join(".pi").join("agent").join("sessions");
+    let sessions_root = tide_home_dir().join(".pi").join("agent").join("sessions");
 
     // Collect directories to scan for .jsonl files
     let dirs_to_scan: Vec<std::path::PathBuf> = if let Some(d) = &session_dir {
@@ -1519,8 +1524,7 @@ async fn list_skills(
     let mut skills = Vec::new();
 
     // 1. Global skills: ~/.pi/agent/skills/
-    let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    let global_dir = std::path::PathBuf::from(&home).join(".pi").join("agent").join("skills");
+    let global_dir = tide_home_dir().join(".pi").join("agent").join("skills");
     discover_skills_in_dir(&global_dir, "global", &mut skills);
 
     // 2. Workspace-local skills: .pi/skills/
@@ -1773,8 +1777,7 @@ fn get_launch_path() -> Option<String> {
 /// Returns a JSON array of { provider, hasCredentials }.
 #[tauri::command]
 fn oauth_list_providers() -> Result<serde_json::Value, String> {
-    let home = std::env::var("HOME").map_err(|_| "Cannot determine home directory")?;
-    let auth_path = std::path::PathBuf::from(&home).join(".pi/agent/auth.json");
+    let auth_path = tide_home_dir().join(".pi/agent/auth.json");
 
     if !auth_path.exists() {
         // No auth file = no OAuth credentials anywhere
@@ -1809,8 +1812,7 @@ fn oauth_list_providers() -> Result<serde_json::Value, String> {
 /// Remove OAuth credentials for a provider from Pi's auth.json.
 #[tauri::command]
 fn oauth_logout(provider: String) -> Result<String, String> {
-    let home = std::env::var("HOME").map_err(|_| "Cannot determine home directory")?;
-    let auth_path = std::path::PathBuf::from(&home).join(".pi/agent/auth.json");
+    let auth_path = tide_home_dir().join(".pi/agent/auth.json");
 
     if !auth_path.exists() {
         return Ok("No credentials to remove.".to_string());
@@ -1836,6 +1838,7 @@ fn oauth_logout(provider: String) -> Result<String, String> {
 
 /// Install the `tide` CLI command to /usr/local/bin.
 /// Uses tokio + osascript to prompt for admin privileges on macOS.
+#[cfg(target_os = "macos")]
 #[tauri::command]
 async fn install_cli(app_handle: tauri::AppHandle) -> Result<String, String> {
     let cli_content = r#"#!/bin/bash
@@ -1920,6 +1923,12 @@ fi
             Err(format!("Installation failed (exit code {}).", code))
         }
     }
+}
+
+#[cfg(target_os = "windows")]
+#[tauri::command]
+async fn install_cli() -> Result<String, String> {
+    Err("CLI installation is not yet supported on Windows. Add the executable directory to your PATH manually.".into())
 }
 
 pub fn run() {

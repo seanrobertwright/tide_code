@@ -63,7 +63,9 @@ export default function tideAuth(pi: ExtensionAPI) {
           onAuth: (info) => {
             // Open the OAuth URL in the default browser
             import("node:child_process").then((cp) => {
-              cp.exec(`open "${info.url}"`);
+              const openCmd = process.platform === 'win32' ? 'start ""' :
+                              process.platform === 'darwin' ? 'open' : 'xdg-open';
+              cp.exec(`${openCmd} "${info.url}"`);
             });
           },
           onPrompt: async (prompt) => {
