@@ -123,7 +123,7 @@ See [PROJECT.md](./PROJECT.md) for the complete file-by-file structure.
 - **Node.js** >= 20
 - **pnpm** (package manager)
 - **Rust** (stable toolchain, installed via rustup)
-- **macOS** 12+ (primary platform; Linux support planned)
+- **macOS** 12+ or **Windows** 10/11 (Linux support planned)
 - At least one LLM API key (Anthropic, OpenAI, or Google) or an OAuth-supported subscription (ChatGPT Plus/Pro, GitHub Copilot, etc.)
 
 ## License

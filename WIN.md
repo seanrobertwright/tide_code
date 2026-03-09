@@ -124,18 +124,18 @@ Tide is a Tauri v2 desktop IDE/AI coding assistant currently targeting macOS. Th
 
 ## Status
 
-| Task | Status | Owner |
-|------|--------|-------|
-| 1.1 notify feature flag | Pending | — |
-| 1.2 beforeDevCommand | Pending | — |
-| 1.3 PTY shell detection | Pending | — |
-| 1.4 Home directory helper | Pending | — |
-| 1.5 CLI install cfg gate | Pending | — |
-| 1.6 Browser open command | Pending | — |
-| 2.1 AppBar padding | Pending | — |
-| 2.2 Bundle config | Pending | — |
-| 2.3 Documentation | Pending | — |
-| 3.1 CI/CD | Pending | — |
-| 3.2 Code signing | Pending | — |
-| 3.3 Auto-updater | Pending | — |
-| 3.4 Credential Manager | Pending | — |
+| Task | Status |
+|------|--------|
+| 1.1 notify feature flag | Done |
+| 1.2 beforeDevCommand | Done |
+| 1.3 PTY shell detection | Done |
+| 1.4 Home directory helper | Done |
+| 1.5 CLI install cfg gate | Done |
+| 1.6 Browser open command | Done |
+| 2.1 AppBar padding | Done |
+| 2.2 Bundle config | Done |
+| 2.3 Documentation | Done |
+| 3.1 CI/CD | Done — `.github/workflows/build-windows.yml` |
+| 3.2 Code signing | Done — `docs/WINDOWS_SIGNING.md` |
+| 3.3 Auto-updater | Done — Windows entries in `latest.json` |
+| 3.4 Credential Manager | Done — `keyring` crate on Windows |

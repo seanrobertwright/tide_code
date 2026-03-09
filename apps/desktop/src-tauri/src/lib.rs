@@ -1539,7 +1539,7 @@ async fn list_skills(
     }
 
     // 3. Installed packages: ~/.pi/agent/packages/*/skills/
-    let packages_dir = std::path::PathBuf::from(&home).join(".pi").join("agent").join("packages");
+    let packages_dir = tide_home_dir().join(".pi").join("agent").join("packages");
     if packages_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&packages_dir) {
             for entry in entries.flatten() {
@@ -1789,13 +1789,19 @@ fn oauth_list_providers() -> Result<serde_json::Value, String> {
     let data: serde_json::Value = serde_json::from_str(&content)
         .map_err(|e| format!("Failed to parse auth.json: {}", e))?;
 
-    // auth.json stores credentials keyed by provider name
-    // Each entry can be { apiKey: "..." } or { oauth: { refresh, access, expires } }
+    // auth.json stores credentials keyed by provider name.
+    // Each entry has "type": "oauth" with refresh/access tokens at top level,
+    // or "type": "api_key" with an apiKey field.
     let mut providers = Vec::new();
     if let Some(obj) = data.as_object() {
         for (key, value) in obj {
-            let has_oauth = value.get("oauth").is_some();
-            let has_api_key = value.get("apiKey").is_some() || value.get("api_key").is_some();
+            let auth_type = value.get("type").and_then(|v| v.as_str()).unwrap_or("");
+            let has_oauth = auth_type == "oauth"
+                || value.get("refresh").is_some()
+                || value.get("oauth").is_some();
+            let has_api_key = auth_type == "api_key"
+                || value.get("apiKey").is_some()
+                || value.get("api_key").is_some();
             if has_oauth || has_api_key {
                 providers.push(serde_json::json!({
                     "provider": key,

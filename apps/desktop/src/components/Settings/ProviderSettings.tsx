@@ -22,9 +22,9 @@ const SERVICES: ProviderConfig[] = [
 /** Known subscription providers that Pi supports via OAuth */
 const SUBSCRIPTION_PROVIDERS: { id: string; name: string; description: string }[] = [
   { id: "openai-codex", name: "OpenAI Codex", description: "ChatGPT Plus/Pro subscription" },
-  { id: "anthropic-max", name: "Anthropic Max", description: "Claude Pro/Max subscription" },
+  { id: "anthropic", name: "Anthropic Max", description: "Claude Pro/Max subscription" },
   { id: "copilot", name: "GitHub Copilot", description: "GitHub Copilot subscription" },
-  { id: "gemini-cli", name: "Google Gemini CLI", description: "Google Gemini subscription" },
+  { id: "google-gemini-cli", name: "Google Gemini CLI", description: "Google Gemini subscription" },
 ];
 
 // Inject spin keyframe once

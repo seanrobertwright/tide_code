@@ -4,6 +4,8 @@ import { useSettingsStore } from "../../stores/settingsStore";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import styles from "./AppBar.module.css";
 
+const isMac = navigator.platform.toUpperCase().includes("MAC");
+
 export function AppBar() {
   const rootPath = useWorkspaceStore((s) => s.rootPath);
   const status = useEngineStore((s) => s.status);
@@ -20,6 +22,7 @@ export function AppBar() {
   return (
     <div
       className={styles.appBar}
+      style={isMac ? { paddingLeft: 72 } : undefined}
       onMouseDown={(e) => {
         // Only drag on left-click and not on interactive elements
         if (e.button === 0 && (e.target as HTMLElement).closest("button") === null) {

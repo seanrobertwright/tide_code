@@ -8,7 +8,8 @@ target/
 .env.*
 !.env.example
 
-# Build artifacts
+# Keys and signing
+.keys/
 .tauri-keys/
 apps/desktop/src-tauri/resources/**
 !apps/desktop/src-tauri/resources/**/.gitkeep

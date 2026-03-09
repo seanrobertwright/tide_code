@@ -4,12 +4,26 @@ Get Tide running locally for development in under 5 minutes.
 
 ## Prerequisites
 
+### All platforms
+
 | Tool | Version | Install |
 |------|---------|---------|
-| Node.js | >= 20 | [nodejs.org](https://nodejs.org) or `brew install node` |
+| Node.js | >= 20 | [nodejs.org](https://nodejs.org) |
 | pnpm | latest | `npm install -g pnpm` |
-| Rust | stable | `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \| sh` |
-| Xcode CLT | latest | `xcode-select --install` (macOS only, needed for Tauri) |
+| Rust | stable | [rustup.rs](https://rustup.rs) |
+
+### macOS
+
+| Tool | Install |
+|------|---------|
+| Xcode CLT | `xcode-select --install` |
+
+### Windows
+
+| Tool | Install |
+|------|---------|
+| Visual Studio Build Tools 2022 | [visualstudio.microsoft.com](https://visualstudio.microsoft.com/visual-cpp-build-tools/) — select **"Desktop development with C++"** workload |
+| WebView2 | Pre-installed on Windows 10/11. If missing, download from [developer.microsoft.com](https://developer.microsoft.com/en-us/microsoft-edge/webview2/) |
 
 Verify:
 
@@ -35,18 +49,25 @@ This installs all workspace dependencies including the Pi coding agent (`@marioz
 
 The Pi agent runs as a sidecar process. Create the wrapper script:
 
+**macOS / Linux:**
 ```bash
 ./scripts/prepare-sidecar.sh
+```
+
+**Windows (PowerShell):**
+```powershell
+.\scripts\prepare-sidecar.ps1
 ```
 
 This creates `apps/desktop/src-tauri/binaries/pi-sidecar-{your-target-triple}` pointing to the Pi CLI in `node_modules`.
 
 ### 3. Set up API keys
 
-Tide stores API keys in the macOS Keychain. You can set them via the Settings panel in the app, or pre-load them:
+You need at least one LLM API key (Anthropic, OpenAI, or Google).
+
+**macOS** — Tide stores keys in the macOS Keychain. Pre-load them from the terminal:
 
 ```bash
-# At minimum, you need one of these:
 security add-generic-password -a "tide" -s "anthropic" -w "sk-ant-..."
 security add-generic-password -a "tide" -s "openai" -w "sk-..."
 security add-generic-password -a "tide" -s "google" -w "AI..."
@@ -55,7 +76,13 @@ security add-generic-password -a "tide" -s "google" -w "AI..."
 security add-generic-password -a "tide" -s "tavily" -w "tvly-..."
 ```
 
-Or just launch the app and enter keys in **Settings > Providers**.
+**Windows** — Keys are stored in an encrypted local file. Set them via the app UI:
+
+1. Launch Tide
+2. Go to **Settings > Providers**
+3. Enter your API keys
+
+**All platforms** — You can always enter or update keys in **Settings > Providers** from within the app.
 
 ### 4. Run in development mode
 
@@ -142,15 +169,20 @@ pnpm build:shared
 
 Pi extension logs go to stderr. In dev mode, check the terminal where `pnpm tauri:dev` is running. Look for `[tide:router]`, `[tide:planner]`, `[tide:index]` prefixes.
 
-For frontend debugging, open the DevTools (Cmd+Opt+I in the Tauri window) and check the console for `[Tide:event]` logs.
+For frontend debugging, open the DevTools (Cmd+Opt+I on macOS, Ctrl+Shift+I on Windows/Linux) and check the console for `[Tide:event]` logs.
 
 ## Troubleshooting
 
 **"Pi package not installed"** -- Run `pnpm install` from the project root, then re-run `./scripts/prepare-sidecar.sh`.
 
-**Port 5173 already in use** -- The dev command auto-kills existing processes on 5173. If it persists: `lsof -ti:5173 | xargs kill -9`.
+**Port 5173 already in use** -- The dev command auto-kills existing processes on 5173. If it persists:
+- macOS/Linux: `lsof -ti:5173 | xargs kill -9`
+- Windows: `netstat -ano | findstr :5173` then `taskkill /PID <pid> /F`
 
-**Rust compilation errors** -- Make sure you have Xcode CLT installed and Rust is up to date: `rustup update stable`.
+**Rust compilation errors** -- Make sure your platform toolchain is installed and Rust is up to date:
+- macOS: install Xcode CLT (`xcode-select --install`)
+- Windows: install Visual Studio Build Tools with the "Desktop development with C++" workload
+- All: `rustup update stable`
 
 **No models available** -- Enter at least one API key in Settings > Providers (Anthropic recommended).
 
