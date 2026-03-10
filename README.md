@@ -1,6 +1,6 @@
 # Tide
 
-> **Now available on Windows!** Tide runs natively on Windows 10/11 with full feature parity -- PTY terminal (PowerShell/cmd), Windows Credential Manager for secure key storage, MSVC build toolchain support, and NSIS/MSI installers. See the [Windows setup guide](./WIN.md) for details.
+> **Now available on Windows!** Tide runs natively on Windows 10/11 with full feature parity -- PTY terminal (PowerShell/cmd), Windows Credential Manager for secure key storage, MSVC build toolchain support, and NSIS/MSI installers cominh soon. See the [Windows setup guide](./WIN.md) for details.
 
 An AI-native code editor with orchestrated multi-step workflows, built on [Tauri v2](https://v2.tauri.app) and the [Pi coding agent](https://shittycodingagent.ai).
 

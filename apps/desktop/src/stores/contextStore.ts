@@ -46,19 +46,30 @@ interface ContextState {
   breakdown: BudgetBreakdown | null;
   contextPack: ContextPack | null;
   inspectorOpen: boolean;
+  autoCompactEnabled: boolean;
+  autoCompactThreshold: number;
+  preCompactTokens: number | null;
+  warningDismissedAt: number;
 
   refreshBreakdown: () => Promise<void>;
   updateFromPiState: (totalTokens: number, budgetTokens: number) => void;
   refreshItems: () => Promise<void>;
+  refreshCategories: () => void;
   togglePin: (id: string) => Promise<void>;
   openInspector: () => void;
   closeInspector: () => void;
+  setPreCompactTokens: (tokens: number) => void;
+  setPostCompactTokens: (tokens: number) => void;
 }
 
 export const useContextStore = create<ContextState>((set) => ({
   breakdown: null,
   contextPack: null,
   inspectorOpen: false,
+  autoCompactEnabled: false,
+  autoCompactThreshold: 0.9,
+  preCompactTokens: null,
+  warningDismissedAt: 0,
 
   refreshBreakdown: async () => {
     // Ask Pi for current state — response arrives as a "response" event
@@ -100,6 +111,18 @@ export const useContextStore = create<ContextState>((set) => ({
     if (tag) {
       tagStore.togglePin(id);
     }
+  },
+
+  refreshCategories: () => {
+    // Re-fetch Pi state to update category breakdown
+    getPiState().catch(() => {});
+  },
+
+  setPreCompactTokens: (tokens: number) => set({ preCompactTokens: tokens }),
+
+  setPostCompactTokens: (_tokens: number) => {
+    // Post-compact tokens are derived from breakdown after compaction;
+    // this setter is called for side-effect logging in stream.ts
   },
 
   openInspector: () => set({ inspectorOpen: true }),

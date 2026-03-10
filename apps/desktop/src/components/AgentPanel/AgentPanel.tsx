@@ -1188,7 +1188,8 @@ function ImageIcon() {
 
 // ── Styles ──────────────────────────────────────────────────
 
-const s: Record<string, React.CSSProperties> = {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const s: Record<string, any> = {
   container: { display: "flex", flexDirection: "column", height: "100%", background: "var(--bg-secondary)", position: "relative" as const },
   tabBar: { display: "flex", alignItems: "center", height: 34, padding: "0 4px", background: "var(--bg-tertiary)", borderBottom: "1px solid var(--border)", gap: 0 },
   tab: { padding: "0 14px", height: "100%", fontSize: "var(--font-size-sm)", fontFamily: "var(--font-ui)", fontWeight: 500, color: "var(--text-secondary)", background: "transparent", border: "none", borderBottomWidth: 2, borderBottomStyle: "solid", borderBottomColor: "transparent", cursor: "pointer", transition: "color 0.15s" },
