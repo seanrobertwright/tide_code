@@ -2,12 +2,15 @@ import { useEffect, useState } from "react";
 import { installCli, getVersionInfo, type VersionInfo } from "../../lib/ipc";
 import { useSettingsStore } from "../../stores/settingsStore";
 import { terminalThemes } from "../../lib/terminalThemes";
+import { appThemes } from "../../lib/appThemes";
 
 export function GeneralSettings() {
   const [cliStatus, setCliStatus] = useState<string | null>(null);
   const [cliError, setCliError] = useState<string | null>(null);
   const [installing, setInstalling] = useState(false);
   const [versions, setVersions] = useState<VersionInfo | null>(null);
+  const appTheme = useSettingsStore((s) => s.appTheme);
+  const setAppTheme = useSettingsStore((s) => s.setAppTheme);
   const terminalTheme = useSettingsStore((s) => s.terminalTheme);
   const terminalScrollback = useSettingsStore((s) => s.terminalScrollback);
   const setTerminalTheme = useSettingsStore((s) => s.setTerminalTheme);
@@ -67,6 +70,25 @@ export function GeneralSettings() {
         </button>
         {cliStatus && <p style={s.success}>{cliStatus}</p>}
         {cliError && <pre style={s.error}>{cliError}</pre>}
+      </div>
+
+      <div style={s.section}>
+        <h3 style={s.sectionTitle}>Appearance</h3>
+        <div style={s.settingRow}>
+          <label style={s.settingLabel}>App Theme</label>
+          <select
+            style={s.select}
+            value={appTheme}
+            onChange={(e) => setAppTheme(e.target.value)}
+          >
+            {Object.keys(appThemes).map((name) => (
+              <option key={name} value={name}>{name}</option>
+            ))}
+          </select>
+        </div>
+        <p style={s.description}>
+          Changes the color scheme of the entire application.
+        </p>
       </div>
 
       <div style={s.section}>

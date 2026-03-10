@@ -253,11 +253,11 @@ export function ProviderSettings() {
               <div style={s.loginStep}>
                 <span style={s.stepNum}>1.</span>
                 <span style={s.loginHint}>Open a terminal and run</span>
-                <code style={s.commandCode}>pi</code>
+                <code style={s.commandCode}>npx pi</code>
                 <button
                   style={s.copyBtn}
                   title="Copy command"
-                  onClick={() => navigator.clipboard.writeText("pi")}
+                  onClick={() => navigator.clipboard.writeText("npx pi")}
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />

@@ -7,6 +7,7 @@ import {
   type OrchestratorConfig,
 } from "../lib/ipc";
 import { useWorkspaceStore } from "./workspace";
+import { applyAppTheme, saveAppTheme, loadAppTheme, defaultAppTheme } from "../lib/appThemes";
 
 export const SETTINGS_TAB_PATH = "__settings__";
 
@@ -34,6 +35,7 @@ interface SettingsState {
     complex?: TierModelConfig;
   };
   orchestratorConfig: OrchestratorConfig;
+  appTheme: string;
   terminalTheme: string;
   terminalScrollback: number;
 
@@ -44,6 +46,7 @@ interface SettingsState {
   setAutoMode: (mode: boolean) => void;
   setTierModel: (tier: "quick" | "standard" | "complex", model: TierModelConfig | undefined) => void;
   updateOrchestratorConfig: (partial: Partial<OrchestratorConfig>) => void;
+  setAppTheme: (theme: string) => void;
   setTerminalTheme: (theme: string) => void;
   setTerminalScrollback: (size: number) => void;
 }
@@ -53,8 +56,13 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
   autoMode: true,
   tierModels: {},
   orchestratorConfig: { ...DEFAULT_ORC_CONFIG },
-  terminalTheme: "Tokyo Night",
-  terminalScrollback: 5000,
+  appTheme: loadAppTheme(),
+  terminalTheme: (() => {
+    try { return localStorage.getItem("tide-terminal-theme") || "Tokyo Night"; } catch { return "Tokyo Night"; }
+  })(),
+  terminalScrollback: (() => {
+    try { return parseInt(localStorage.getItem("tide-terminal-scrollback") || "5000") || 5000; } catch { return 5000; }
+  })(),
 
   load: async () => {
     try {
@@ -112,6 +120,18 @@ export const useSettingsStore = create<SettingsState>((set, get) => ({
       console.error("Failed to write orchestrator config:", e),
     );
   },
-  setTerminalTheme: (theme) => set({ terminalTheme: theme }),
-  setTerminalScrollback: (size) => set({ terminalScrollback: Math.max(500, Math.min(50000, size)) }),
+  setAppTheme: (theme) => {
+    set({ appTheme: theme });
+    applyAppTheme(theme);
+    saveAppTheme(theme);
+  },
+  setTerminalTheme: (theme) => {
+    set({ terminalTheme: theme });
+    try { localStorage.setItem("tide-terminal-theme", theme); } catch {}
+  },
+  setTerminalScrollback: (size) => {
+    const clamped = Math.max(500, Math.min(50000, size));
+    set({ terminalScrollback: clamped });
+    try { localStorage.setItem("tide-terminal-scrollback", String(clamped)); } catch {}
+  },
 }));
