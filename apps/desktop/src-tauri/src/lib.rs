@@ -1938,6 +1938,101 @@ fi
     }
 }
 
+/// Install the `tide` CLI command to /usr/local/bin on Linux.
+/// Uses pkexec (Polkit) to prompt for admin privileges if needed.
+#[cfg(target_os = "linux")]
+#[tauri::command]
+async fn install_cli(app_handle: tauri::AppHandle) -> Result<String, String> {
+    // Resolve the path to the running Tide binary so the CLI script can launch it.
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to locate Tide executable: {}", e))?;
+    let exe = exe_path.to_string_lossy();
+
+    let cli_content = format!(
+        r#"#!/bin/bash
+# Tide CLI — open folders in Tide IDE
+# Installed by Tide > Settings > Install CLI
+
+if [ -z "$1" ]; then
+  "{exe}" &
+else
+  # Resolve to absolute path
+  TARGET=$(cd "$1" 2>/dev/null && pwd || echo "$1")
+  # Pass the launch dir so the app can resolve relative paths
+  TIDE_LAUNCH_DIR="$(pwd)" "{exe}" "$TARGET" &
+fi
+"#,
+        exe = exe,
+    );
+
+    let cli_path = "/usr/local/bin/tide";
+
+    // Try writing directly first (works if user owns /usr/local/bin)
+    if std::fs::write(cli_path, &cli_content).is_ok() {
+        use std::os::unix::fs::PermissionsExt;
+        let perms = std::fs::Permissions::from_mode(0o755);
+        let _ = std::fs::set_permissions(cli_path, perms);
+        let _ = app_handle;
+        return Ok(
+            "CLI installed! You can now use `tide .` or `tide /path/to/project` from any terminal."
+                .to_string(),
+        );
+    }
+
+    // Write the CLI script to a temp file, then use pkexec to copy it
+    // with admin privileges (shows native Polkit password dialog).
+    let tmp_cli = std::env::temp_dir().join("tide-cli-install.tmp");
+    std::fs::write(&tmp_cli, &cli_content)
+        .map_err(|e| format!("Failed to write temp file: {}", e))?;
+
+    let shell_cmd = format!(
+        "mkdir -p /usr/local/bin && cp '{}' /usr/local/bin/tide && chmod +x /usr/local/bin/tide && rm -f '{}'",
+        tmp_cli.display(),
+        tmp_cli.display()
+    );
+
+    let result = tokio::task::spawn_blocking(move || {
+        use std::fs::File;
+        let dev_null_in =
+            File::open("/dev/null").map_err(|e| format!("open /dev/null: {}", e))?;
+        let dev_null_out =
+            File::create("/dev/null").map_err(|e| format!("create /dev/null: {}", e))?;
+        let dev_null_err =
+            File::create("/dev/null").map_err(|e| format!("create /dev/null: {}", e))?;
+
+        std::process::Command::new("pkexec")
+            .args(["bash", "-c", &shell_cmd])
+            .stdin(dev_null_in)
+            .stdout(dev_null_out)
+            .stderr(dev_null_err)
+            .status()
+            .map_err(|e| format!("Failed to launch pkexec: {}", e))
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+    .map_err(|e| {
+        let _ = std::fs::remove_file(&tmp_cli);
+        e
+    })?;
+
+    let _ = std::fs::remove_file(&tmp_cli);
+
+    if result.success() {
+        Ok(
+            "CLI installed! You can now use `tide .` or `tide /path/to/project` from any terminal."
+                .to_string(),
+        )
+    } else {
+        let code = result.code().unwrap_or(-1);
+        if code == 126 {
+            // pkexec returns 126 when the user dismisses the auth dialog
+            Err("Installation cancelled.".to_string())
+        } else {
+            Err(format!("Installation failed (exit code {}).", code))
+        }
+    }
+}
+
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn install_cli() -> Result<String, String> {
