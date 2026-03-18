@@ -34,7 +34,8 @@
       "binaries/pi-sidecar"
     ],
     "resources": [
-      "resources/pi-extensions/*"
+      "resources/pi-extensions/*",
+      "resources/pi-assets/**/*"
     ],
     "icon": [
       "icons/32x32.png",
@@ -63,7 +64,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDQyQURBQUU0NUE1QzZERUUKUldUdWJWeGE1S3F0UXVHQ0g0VDZxTTVXZzN1OXl2eGs2b3V4YzQwS3dLNHkvSlRCNzFtbGtYbEEK",
       "endpoints": [
-        "https://YOUR_UPDATE_SERVER/tidecode/latest.json"
+        "https://github.com/seanrobertwright/tide_code/releases/latest/download/latest.json"
       ]
     }
   }

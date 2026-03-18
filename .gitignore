@@ -14,12 +14,13 @@ target/
 # apps/desktop/src-tauri/resources/**
 # !apps/desktop/src-tauri/resources/**/.gitkeep
 apps/desktop/src-tauri/binaries/
+apps/desktop/src-tauri/resources/pi-assets/
 build.log
 
 # Project-local data
 .tide/
 _archive_engine/
 
-# Private release scripts
-scripts/
+# Legacy sidecar scripts (replaced by build-sidecar.*)
+scripts/prepare-sidecar.*
 apps/desktop/scripts/

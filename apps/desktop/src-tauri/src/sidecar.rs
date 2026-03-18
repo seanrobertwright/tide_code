@@ -161,6 +161,14 @@ pub async fn start_pi(
         cmd.arg(arg);
     }
 
+    // If using bundled sidecar, set PI_PACKAGE_DIR so the Bun binary
+    // finds its assets (package.json, themes, docs, etc.) in the
+    // Tauri resources directory instead of next to the executable.
+    if let Some(assets_dir) = resolve_pi_assets_dir() {
+        tracing::info!("Setting PI_PACKAGE_DIR={}", assets_dir);
+        cmd.env("PI_PACKAGE_DIR", &assets_dir);
+    }
+
     cmd.arg("--mode").arg("rpc");
     cmd.arg("-c"); // Continue last session (restores chat history)
 
@@ -232,6 +240,38 @@ fn target_triple() -> &'static str {
     { "x86_64-unknown-linux-gnu" }
     #[cfg(all(target_os = "linux", target_arch = "aarch64"))]
     { "aarch64-unknown-linux-gnu" }
+}
+
+/// Resolve the path to bundled Pi assets (resources/pi-assets/).
+/// Tauri places resources alongside the main exe on Windows, and in
+/// Contents/Resources/ on macOS. Returns None if not in a bundled context.
+fn resolve_pi_assets_dir() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let exe_dir = exe.parent()?;
+
+    // Check if we're using the bundled sidecar (not dev mode)
+    let sidecar_name = format!("pi-sidecar-{}", target_triple());
+    let bundled = exe_dir.join(&sidecar_name);
+    if !bundled.exists() {
+        return None;
+    }
+
+    // Windows/Linux: resources are alongside the exe
+    let assets = exe_dir.join("resources").join("pi-assets");
+    if assets.exists() {
+        return Some(assets.to_string_lossy().to_string());
+    }
+
+    // macOS: resources are in Contents/Resources/
+    #[cfg(target_os = "macos")]
+    {
+        let mac_assets = exe_dir.parent()?.join("Resources").join("pi-assets");
+        if mac_assets.exists() {
+            return Some(mac_assets.to_string_lossy().to_string());
+        }
+    }
+
+    None
 }
 
 pub fn resolve_pi_path() -> Result<String, Box<dyn std::error::Error + Send + Sync>> {
