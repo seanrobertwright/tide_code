@@ -1746,6 +1746,11 @@ fn resolve_extension_paths() -> Vec<String> {
 #[tauri::command]
 fn get_launch_path() -> Option<String> {
     let args: Vec<String> = std::env::args().collect();
+    tracing::debug!("get_launch_path: raw args = {:?}", args);
+    tracing::debug!(
+        "get_launch_path: TIDE_LAUNCH_DIR = {:?}",
+        std::env::var("TIDE_LAUNCH_DIR").ok()
+    );
     // Skip the binary name (args[0]). Look for the first arg that looks like a path
     // (not a flag starting with -). Tauri may add its own args, so skip those too.
     for arg in args.iter().skip(1) {
@@ -1764,10 +1769,12 @@ fn get_launch_path() -> Option<String> {
                 .unwrap_or_else(|_| std::env::current_dir().unwrap_or_default());
             base.join(path)
         };
+        tracing::debug!("get_launch_path: candidate = {:?}, is_dir = {}", abs, abs.is_dir());
         if abs.is_dir() {
             return Some(abs.to_string_lossy().to_string());
         }
     }
+    tracing::debug!("get_launch_path: no valid path found");
     None
 }
 
@@ -1952,12 +1959,12 @@ async fn install_cli() -> Result<String, String> {
 rem Tide CLI — open folders in Tide IDE
 rem Installed by Tide > Settings > Install CLI
 
+set "TIDE_LAUNCH_DIR=%CD%"
+
 if "%~1"=="" (
-    start "" "{exe_dir}\{exe_name}"
+    "{exe_dir}\{exe_name}"
 ) else (
-    set "TARGET=%~f1"
-    set "TIDE_LAUNCH_DIR=%CD%"
-    start "" "{exe_dir}\{exe_name}" "%TARGET%"
+    "{exe_dir}\{exe_name}" "%~f1"
 )
 "#,
         exe_dir = exe_dir.to_string_lossy().replace('/', "\\"),
