@@ -1934,7 +1934,137 @@ fi
 #[cfg(target_os = "windows")]
 #[tauri::command]
 async fn install_cli() -> Result<String, String> {
-    Err("CLI installation is not yet supported on Windows. Add the executable directory to your PATH manually.".into())
+    // Find the directory containing the running Tide executable.
+    let exe_path = std::env::current_exe()
+        .map_err(|e| format!("Failed to locate Tide executable: {}", e))?;
+    let exe_dir = exe_path
+        .parent()
+        .ok_or("Failed to determine executable directory")?;
+    let exe_name = exe_path
+        .file_name()
+        .ok_or("Failed to determine executable name")?
+        .to_string_lossy();
+
+    // Create tide.cmd batch script next to the executable.
+    let cmd_path = exe_dir.join("tide.cmd");
+    let cmd_content = format!(
+        r#"@echo off
+rem Tide CLI — open folders in Tide IDE
+rem Installed by Tide > Settings > Install CLI
+
+if "%~1"=="" (
+    start "" "{exe_dir}\{exe_name}"
+) else (
+    set "TARGET=%~f1"
+    set "TIDE_LAUNCH_DIR=%CD%"
+    start "" "{exe_dir}\{exe_name}" "%TARGET%"
+)
+"#,
+        exe_dir = exe_dir.to_string_lossy().replace('/', "\\"),
+        exe_name = exe_name,
+    );
+
+    std::fs::write(&cmd_path, &cmd_content)
+        .map_err(|e| format!("Failed to write tide.cmd: {}", e))?;
+
+    // Add the exe directory to the user's PATH if not already present.
+    let exe_dir_str = exe_dir.to_string_lossy().to_string();
+    let path_updated = add_to_user_path(&exe_dir_str)?;
+
+    if path_updated {
+        // Broadcast WM_SETTINGCHANGE so running shells pick up the new PATH.
+        broadcast_environment_change();
+        Ok(format!(
+            "CLI installed! Added {} to your PATH.\n\
+             Open a new terminal and use `tide .` or `tide C:\\path\\to\\project`.",
+            exe_dir_str
+        ))
+    } else {
+        Ok("CLI installed! You can now use `tide .` or `tide C:\\path\\to\\project` from any terminal.".to_string())
+    }
+}
+
+/// Add `dir` to the user-level PATH (HKCU\\Environment) if not already present.
+#[cfg(target_os = "windows")]
+fn add_to_user_path(dir: &str) -> Result<bool, String> {
+    use winreg::enums::*;
+    use winreg::RegKey;
+
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    let env = hkcu
+        .open_subkey_with_flags("Environment", KEY_READ | KEY_WRITE)
+        .map_err(|e| format!("Failed to open registry: {}", e))?;
+
+    // Read the current user PATH (may not exist yet).
+    let current_path: String = env.get_value("Path").unwrap_or_default();
+
+    // Check if the directory is already in PATH (case-insensitive).
+    let dir_lower = dir.to_lowercase();
+    let already_present = current_path
+        .split(';')
+        .any(|entry| entry.trim().to_lowercase().trim_end_matches('\\') == dir_lower.trim_end_matches('\\'));
+
+    if already_present {
+        return Ok(false);
+    }
+
+    // Append our directory.
+    let new_path = if current_path.is_empty() {
+        dir.to_string()
+    } else {
+        format!("{};{}", current_path.trim_end_matches(';'), dir)
+    };
+
+    // Write as REG_EXPAND_SZ so %VAR% references in existing entries are preserved.
+    env.set_raw_value(
+        "Path",
+        &winreg::RegValue {
+            vtype: REG_EXPAND_SZ,
+            bytes: {
+                let wide: Vec<u16> = new_path.encode_utf16().chain(std::iter::once(0)).collect();
+                wide.iter().flat_map(|w| w.to_le_bytes()).collect()
+            },
+        },
+    )
+    .map_err(|e| format!("Failed to update PATH: {}", e))?;
+
+    Ok(true)
+}
+
+/// Broadcast WM_SETTINGCHANGE so Explorer and new shells pick up the PATH change.
+#[cfg(target_os = "windows")]
+fn broadcast_environment_change() {
+    use std::ffi::CString;
+    // Use raw Win32 API via windows-sys or manual FFI.
+    #[link(name = "user32")]
+    extern "system" {
+        fn SendMessageTimeoutA(
+            hwnd: isize,
+            msg: u32,
+            wparam: usize,
+            lparam: *const i8,
+            flags: u32,
+            timeout: u32,
+            result: *mut usize,
+        ) -> isize;
+    }
+    const HWND_BROADCAST: isize = 0xFFFF_u16 as isize;
+    const WM_SETTINGCHANGE: u32 = 0x001A;
+    const SMTO_ABORTIFHUNG: u32 = 0x0002;
+    if let Ok(env) = CString::new("Environment") {
+        unsafe {
+            let mut result: usize = 0;
+            SendMessageTimeoutA(
+                HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                env.as_ptr(),
+                SMTO_ABORTIFHUNG,
+                5000,
+                &mut result,
+            );
+        }
+    }
 }
 
 pub fn run() {
