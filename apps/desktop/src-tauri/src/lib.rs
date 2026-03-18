@@ -1552,6 +1552,12 @@ async fn list_skills(
         }
     }
 
+    // 4. Git-installed repos: ~/.pi/agent/git/<host>/<owner>/<repo>/skills/
+    let git_dir = tide_home_dir().join(".pi").join("agent").join("git");
+    if git_dir.exists() {
+        discover_git_skills(&git_dir, &mut skills);
+    }
+
     Ok(skills)
 }
 
@@ -1575,6 +1581,44 @@ fn discover_skills_in_dir(dir: &std::path::Path, source: &str, skills: &mut Vec<
                     if let Some(skill) = parse_skill_file(&skill_md, source) {
                         skills.push(skill);
                     }
+                }
+            }
+        }
+    }
+}
+
+/// Walk ~/.pi/agent/git/ to find cloned repos and discover skills in each repo's skills/ directory.
+/// Structure: git/<host>/<owner>/<repo>/skills/<skill-name>/SKILL.md
+fn discover_git_skills(git_dir: &std::path::Path, skills: &mut Vec<SkillInfo>) {
+    // Walk host -> owner -> repo (3 levels deep)
+    let hosts = match std::fs::read_dir(git_dir) {
+        Ok(entries) => entries,
+        Err(_) => return,
+    };
+    for host in hosts.flatten() {
+        if !host.path().is_dir() { continue; }
+        let owners = match std::fs::read_dir(host.path()) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+        for owner in owners.flatten() {
+            if !owner.path().is_dir() { continue; }
+            let repos = match std::fs::read_dir(owner.path()) {
+                Ok(entries) => entries,
+                Err(_) => continue,
+            };
+            for repo in repos.flatten() {
+                let repo_path = repo.path();
+                if !repo_path.is_dir() { continue; }
+                let repo_name = format!(
+                    "{}/{}/{}",
+                    host.file_name().to_string_lossy(),
+                    owner.file_name().to_string_lossy(),
+                    repo.file_name().to_string_lossy(),
+                );
+                let skills_dir = repo_path.join("skills");
+                if skills_dir.exists() {
+                    discover_skills_in_dir(&skills_dir, &format!("git:{}", repo_name), skills);
                 }
             }
         }
