@@ -117,8 +117,13 @@ tide_code/
 
 See [PROJECT.md](./PROJECT.md) for the complete file-by-file structure.
 
+## Tutorial
+
+New to Tide Code? The **[TaskFlow Tutorial](./TUTORIAL.md)** walks you through building a full-stack todolist app (React + FastAPI + HTML/CSS/JS) while learning every feature of the IDE — from basic editing to AI-powered orchestration. It covers all 12 major features across 12 chapters and takes 3-5 hours to complete.
+
 ## Quick Links
 
+- [TUTORIAL.md](./TUTORIAL.md) -- Step-by-step tutorial building a full-stack app with Tide Code
 - [QUICKSTART.md](./QUICKSTART.md) -- Development setup and running locally
 - [WIN.md](./WIN.md) -- Windows port implementation details
 - [PROJECT.md](./PROJECT.md) -- Detailed architecture, data flows, and design decisions
