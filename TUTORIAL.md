@@ -350,7 +350,7 @@ The file opens automatically in the editor. Type the following complete HTML doc
                 </div>
                 <div class="step">
                     <div class="step-number">2</div>
-                    <h3>Organize &amp; Prioritize</h3>
+                    <h3>Organize & Prioritize</h3>
                     <p>
                         Use categories and priorities to keep your list
                         tidy. Filter and sort to see exactly what you need.
@@ -383,7 +383,7 @@ The file opens automatically in the editor. Type the following complete HTML doc
     <!-- Footer -->
     <footer class="footer">
         <div class="container">
-            <p>&copy; 2026 TaskFlow. Built with care as a learning project.</p>
+            <p>© 2026 TaskFlow. Built with care as a learning project.</p>
             <ul class="footer-links">
                 <li><a href="#">GitHub</a></li>
                 <li><a href="#">Docs</a></li>
@@ -849,16 +849,16 @@ Press **Ctrl+S** to save.
 
 You've already used one keyboard shortcut — **Ctrl+S** to save. Let's talk about a few more that will save you time throughout this tutorial:
 
-| Shortcut | Action |
-|----------|--------|
-| **Ctrl+S** | Save the current file |
-| **Ctrl+Shift+P** | Open the Command Palette |
-| **Ctrl+P** | Quick file open (search by name) |
-| **Ctrl+W** | Close the current tab |
-| **Ctrl+Tab** | Cycle through open tabs |
-| **Ctrl+/** | Toggle line comment |
-| **Ctrl+Z** | Undo |
-| **Ctrl+Shift+Z** | Redo |
+| Shortcut         | Action                           |
+| ---------------- | -------------------------------- |
+| **Ctrl+S**       | Save the current file            |
+| **Ctrl+Shift+P** | Open the Command Palette         |
+| **Ctrl+P**       | Quick file open (search by name) |
+| **Ctrl+W**       | Close the current tab            |
+| **Ctrl+Tab**     | Cycle through open tabs          |
+| **Ctrl+/**       | Toggle line comment              |
+| **Ctrl+Z**       | Undo                             |
+| **Ctrl+Shift+Z** | Redo                             |
 
 Try opening the **Command Palette** now with **Ctrl+Shift+P**. A search bar appears at the top of the editor. You can type commands like "theme," "font size," or "format" to discover features without navigating menus. Press Escape to close it.
 
@@ -1151,16 +1151,19 @@ This creates a `venv/` folder inside `backend/`. You'll notice it appear in the 
 Now activate the virtual environment:
 
 **On Windows (Command Prompt or PowerShell in the Tide Code terminal):**
+
 ```bash
 venv\Scripts\activate
 ```
 
 **On Windows (Git Bash):**
+
 ```bash
 source venv/Scripts/activate
 ```
 
 **On macOS / Linux:**
+
 ```bash
 source venv/bin/activate
 ```
@@ -1823,6 +1826,7 @@ This file ties everything together. Here's what each section does:
 - **Health check** — The `GET /` endpoint returns a simple JSON object. It exists so you (and monitoring tools) can quickly check whether the API is alive without hitting a "real" endpoint.
 
 - **CRUD endpoints** — These follow REST conventions:
+  
   - `GET /todos` — List all tasks
   - `POST /todos` — Create a new task
   - `GET /todos/{id}` — Get one task by ID
@@ -1891,6 +1895,7 @@ curl http://127.0.0.1:8000/
 ```
 
 Expected response:
+
 ```json
 {"status":"ok","message":"TaskFlow API is running."}
 ```
@@ -1904,6 +1909,7 @@ curl -X POST http://127.0.0.1:8000/todos \
 ```
 
 Expected response (your timestamps and ID will differ):
+
 ```json
 {
   "id": 1,
@@ -1951,6 +1957,7 @@ curl -X DELETE http://127.0.0.1:8000/todos/2
 ```
 
 Expected response:
+
 ```json
 {"message":"Todo 2 deleted successfully."}
 ```
@@ -1962,6 +1969,7 @@ curl http://127.0.0.1:8000/todos/2
 ```
 
 Expected response:
+
 ```json
 {"detail":"Todo with id 2 not found."}
 ```
@@ -2228,7 +2236,7 @@ function TodoItem({ todo, onToggle, onDelete }: TodoItemProps) {
         onClick={() => onDelete(todo.id)}
         aria-label={`Delete "${todo.title}"`}
       >
-        &times;
+        ×
       </button>
     </div>
   );
@@ -2483,7 +2491,7 @@ function App() {
         {error && (
           <div className="error-banner">
             <span>{error}</span>
-            <button onClick={() => setError(null)}>&times;</button>
+            <button onClick={() => setError(null)}>×</button>
           </div>
         )}
 
@@ -3049,6 +3057,7 @@ Pi's responses are rendered as rich markdown in the Agent Panel. Here's what to 
 - **Multiple changes** in a single response are presented sequentially, each with its own diff and approval dialog
 
 When Pi writes a longer response, it typically follows this structure:
+
 1. A brief acknowledgment of what you asked
 2. An explanation of the approach it's taking
 3. The actual file modifications (with diffs)
@@ -3294,13 +3303,13 @@ Orchestration is a multi-phase AI pipeline that takes a complex, multi-file task
 
 Think of it this way:
 
-| | Simple Agent Prompt | Orchestration |
-|---|---|---|
-| **Scope** | One-shot, usually touches 1-2 files | Multi-step, coordinates changes across many files |
-| **Planning** | None -- the agent improvises | Structured plan with numbered steps and acceptance criteria |
-| **Quality check** | None -- you review manually | Automated QA loop checks the output |
-| **Model selection** | Default model | Complexity-aware routing picks the most capable model |
-| **Transparency** | Chat messages | Pipeline Progress indicator, Plan Tab, step-by-step tracking |
+|                     | Simple Agent Prompt                 | Orchestration                                                |
+| ------------------- | ----------------------------------- | ------------------------------------------------------------ |
+| **Scope**           | One-shot, usually touches 1-2 files | Multi-step, coordinates changes across many files            |
+| **Planning**        | None -- the agent improvises        | Structured plan with numbered steps and acceptance criteria  |
+| **Quality check**   | None -- you review manually         | Automated QA loop checks the output                          |
+| **Model selection** | Default model                       | Complexity-aware routing picks the most capable model        |
+| **Transparency**    | Chat messages                       | Pipeline Progress indicator, Plan Tab, step-by-step tracking |
 
 ### When to Use Orchestration
 
@@ -3502,10 +3511,12 @@ If the orchestration appears to stall (no heartbeat received for 30 seconds), Ti
 Open the **File Tree** (Cmd+B if it is not visible). You should see new and modified files:
 
 In the **backend** directory:
+
 - Modified `main.py` (or equivalent) with new category endpoints and updated todo endpoints
 - Possibly a new models or schemas file for the Category model
 
 In the **frontend** directory:
+
 - New component files for category management
 - Modified `App.tsx` or `TodoList.tsx` with category filtering
 - Modified `AddTodo.tsx` with a category selector
@@ -3523,6 +3534,7 @@ cd frontend && npm run dev
 ```
 
 Open your browser to the frontend URL and test the new features:
+
 - Create a few categories with different colors
 - Assign categories to your todos
 - Try filtering by category
@@ -3548,13 +3560,13 @@ CategoryManager component, category filter bar, and todo-category assignment."
 
 You can tune orchestration behavior in **Settings > Orchestration**. The key options are:
 
-| Setting | Default | What it controls |
-|---|---|---|
-| Review Mode | `fresh_session` | Whether the reviewer gets a clean context or reuses the build session |
-| Max Review Iterations | `2` | How many times the QA loop can repeat before auto-completing |
-| QA Commands | *(empty)* | Shell commands the reviewer must run (e.g., `npm test`, `npm run lint`) |
-| Clarify Timeout | `120s` | How long to wait for your answer to a Clarify Card |
-| Lock Model | `true` | Prevent the router from switching models mid-orchestration |
+| Setting               | Default         | What it controls                                                        |
+| --------------------- | --------------- | ----------------------------------------------------------------------- |
+| Review Mode           | `fresh_session` | Whether the reviewer gets a clean context or reuses the build session   |
+| Max Review Iterations | `2`             | How many times the QA loop can repeat before auto-completing            |
+| QA Commands           | *(empty)*       | Shell commands the reviewer must run (e.g., `npm test`, `npm run lint`) |
+| Clarify Timeout       | `120s`          | How long to wait for your answer to a Clarify Card                      |
+| Lock Model            | `true`          | Prevent the router from switching models mid-orchestration              |
 
 > 💡 **Tip:** If you have tests set up for your project, adding your test command to QA Commands is highly recommended. This means the review phase will actually run your tests and fix any failures before completing. For TaskFlow, you could add `cd frontend && npm test` once you have tests written.
 
@@ -3684,16 +3696,16 @@ You have already been benefiting from Pi Extensions without realizing it. Every 
 
 Let's review what each one does, now that you have seen them in action:
 
-| Extension | What It Does | Where You Saw It |
-|---|---|---|
-| `tide-classify` | Classifies prompts as quick/standard/complex | Chapter 7: determined your category task was complex |
-| `tide-router` | Routes prompts to the appropriate model tier | Chapter 7: selected a powerful model for orchestration |
-| `tide-planner` | Generates structured plans during orchestration | Chapter 7: created the 7-step category management plan |
-| `tide-index` | Connects the agent to the codebase index for symbol search | Chapter 8: enabled the agent to find functions and explain data flow |
-| `tide-project` | Injects project context (TIDE.md rules, project memory) | Every chapter: the agent knew your project structure |
-| `tide-safety` | Safety guardrails (write approval, command approval) | Chapter 5: you approved file writes and command executions |
-| `tide-session` | Manages session summaries and project memory | This chapter: you will use it to save project knowledge |
-| `tide-web-search` | Web search capability via Tavily API | Available when you configure a Tavily API key |
+| Extension         | What It Does                                               | Where You Saw It                                                     |
+| ----------------- | ---------------------------------------------------------- | -------------------------------------------------------------------- |
+| `tide-classify`   | Classifies prompts as quick/standard/complex               | Chapter 7: determined your category task was complex                 |
+| `tide-router`     | Routes prompts to the appropriate model tier               | Chapter 7: selected a powerful model for orchestration               |
+| `tide-planner`    | Generates structured plans during orchestration            | Chapter 7: created the 7-step category management plan               |
+| `tide-index`      | Connects the agent to the codebase index for symbol search | Chapter 8: enabled the agent to find functions and explain data flow |
+| `tide-project`    | Injects project context (TIDE.md rules, project memory)    | Every chapter: the agent knew your project structure                 |
+| `tide-safety`     | Safety guardrails (write approval, command approval)       | Chapter 5: you approved file writes and command executions           |
+| `tide-session`    | Manages session summaries and project memory               | This chapter: you will use it to save project knowledge              |
+| `tide-web-search` | Web search capability via Tavily API                       | Available when you configure a Tavily API key                        |
 
 These extensions hook into the agent's lifecycle at specific points. For example, `tide-router` runs on `before_agent_start` to select the model before the LLM call happens. `tide-safety` runs on `tool_call` to intercept potentially dangerous operations. `tide-index` registers custom tools that the agent can invoke during its reasoning.
 
@@ -3802,6 +3814,7 @@ What do you remember about this project?
 The agent will call `tide_memory_read` without a specific key, which returns all stored entries. You will see a list of key-value pairs representing everything the agent has learned about your project.
 
 > 💡 **Tip:** Project memory is especially useful for recording architectural decisions, coding conventions, and planned future work. Some good things to store:
+> 
 > - "We use camelCase for frontend variables and snake_case for backend"
 > - "The frontend uses React Query for server state management"
 > - "Authentication is planned for Phase 2 but not yet implemented"
@@ -3962,11 +3975,11 @@ Look at the **status bar** at the bottom of the Tide Code window. You'll see a s
 
 The dial changes color based on usage:
 
-| Color | Usage | Meaning |
-|-------|-------|---------|
-| Green | Under 60% | Plenty of room -- the agent has full recall of the conversation |
-| Yellow | 60-85% | Getting full -- older messages may start being summarized |
-| Red | 85%+ | Nearly full -- compaction will happen soon |
+| Color  | Usage     | Meaning                                                         |
+| ------ | --------- | --------------------------------------------------------------- |
+| Green  | Under 60% | Plenty of room -- the agent has full recall of the conversation |
+| Yellow | 60-85%    | Getting full -- older messages may start being summarized       |
+| Red    | 85%+      | Nearly full -- compaction will happen soon                      |
 
 Hover over the Context Dial to see a detailed tooltip showing:
 
@@ -4017,6 +4030,7 @@ In the status bar, next to the Context Dial, you'll see the **Model Picker** -- 
 The dropdown is organized into sections:
 
 **Router (Auto mode):**
+
 - **Auto** -- Tide automatically picks the best model for each prompt based on complexity. The display shows "Auto" followed by the current model name (e.g., "Auto . claude-sonnet-4-20250514").
 
 **Manual model selection:**
@@ -4024,12 +4038,12 @@ Models are grouped by provider (Anthropic, OpenAI, Google, etc.). Each provider 
 
 **When to use different models:**
 
-| Situation | Recommended Approach |
-|-----------|---------------------|
-| Quick questions, formatting | Auto mode or a fast model |
-| General coding tasks | Auto mode (standard tier) |
-| Complex refactors, architecture | A flagship model (Claude, GPT-4) |
-| Rapid iteration, many small prompts | A faster, cheaper model |
+| Situation                           | Recommended Approach             |
+| ----------------------------------- | -------------------------------- |
+| Quick questions, formatting         | Auto mode or a fast model        |
+| General coding tasks                | Auto mode (standard tier)        |
+| Complex refactors, architecture     | A flagship model (Claude, GPT-4) |
+| Rapid iteration, many small prompts | A faster, cheaper model          |
 
 When you manually select a model, Auto mode is turned off. The picker shows the exact model name so you always know what's generating responses.
 
@@ -4064,22 +4078,24 @@ Beyond choosing which model to use, you can control **how deeply** the agent thi
 
 In the status bar, you'll find the **Thinking Level Picker** next to the Model Picker. It shows the current thinking level with a visual indicator. Click it to see all available levels:
 
-| Level | Icon | Best For |
-|-------|------|----------|
-| Off | Empty circle | Maximum speed, simple factual responses |
-| Minimal | Quarter-filled | Quick answers, boilerplate code |
-| Low | Half-filled | Standard coding questions |
-| Medium | Three-quarter filled | Multi-step problems (default) |
-| High | Filled circle | Complex debugging, architectural decisions |
-| Max | Large filled circle | The hardest problems -- deep reasoning |
+| Level   | Icon                 | Best For                                   |
+| ------- | -------------------- | ------------------------------------------ |
+| Off     | Empty circle         | Maximum speed, simple factual responses    |
+| Minimal | Quarter-filled       | Quick answers, boilerplate code            |
+| Low     | Half-filled          | Standard coding questions                  |
+| Medium  | Three-quarter filled | Multi-step problems (default)              |
+| High    | Filled circle        | Complex debugging, architectural decisions |
+| Max     | Large filled circle  | The hardest problems -- deep reasoning     |
 
 **When to crank it up:**
+
 - You're debugging a subtle race condition
 - You're designing the architecture for a new feature
 - You need the agent to consider edge cases and tradeoffs
 - You're asking about a tricky algorithm
 
 **When to keep it low:**
+
 - You need boilerplate code generated
 - You're asking the agent to format or rename something
 - You want a quick factual answer
@@ -4151,13 +4167,13 @@ Navigate with arrow keys and press Enter to execute, or click directly. Press Es
 
 Try these commands right now:
 
-| Type this... | To do this... |
-|-------------|---------------|
-| `new term` | Open a new terminal |
-| `toggle file` | Show/hide the file tree sidebar |
-| `settings` | Open the Settings panel |
-| `index` | Index the workspace for code intelligence |
-| `new session` | Start a fresh agent session |
+| Type this...  | To do this...                             |
+| ------------- | ----------------------------------------- |
+| `new term`    | Open a new terminal                       |
+| `toggle file` | Show/hide the file tree sidebar           |
+| `settings`    | Open the Settings panel                   |
+| `index`       | Index the workspace for code intelligence |
+| `new session` | Start a fresh agent session               |
 
 > 📖 **What just happened?** The Command Palette is a universal launcher. Instead of hunting through menus or remembering where a button lives, you just describe what you want to do. Tide Code's fuzzy matcher is forgiving -- it matches against command labels, categories, and keywords, so you'll find what you need even with partial input.
 
@@ -4171,39 +4187,39 @@ Tide Code follows VS Code keyboard conventions, so if you've used VS Code before
 
 #### General
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+Shift+P | Open Command Palette |
-| Ctrl+O | Open folder |
-| Ctrl+B | Toggle file tree sidebar |
-| Ctrl+, | Open Settings |
-| Ctrl+T | Toggle terminal panel |
+| Shortcut     | Action                   |
+| ------------ | ------------------------ |
+| Ctrl+Shift+P | Open Command Palette     |
+| Ctrl+O       | Open folder              |
+| Ctrl+B       | Toggle file tree sidebar |
+| Ctrl+,       | Open Settings            |
+| Ctrl+T       | Toggle terminal panel    |
 
 > 💡 **Tip:** On macOS, replace Ctrl with Cmd for all of these shortcuts. Tide Code automatically adapts to your platform.
 
 #### Editor
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+S | Save current file |
+| Shortcut     | Action                                      |
+| ------------ | ------------------------------------------- |
+| Ctrl+S       | Save current file                           |
 | Ctrl+Shift+T | Tag selected region (in editor or terminal) |
 
 Region tagging is a Tide-specific feature -- select a block of code or terminal output, press Ctrl+Shift+T, and it becomes a tagged reference that you can mention in agent conversations. This was covered in Chapter 8 with code intelligence.
 
 #### Agent Panel
 
-| Shortcut | Action |
-|----------|--------|
-| Enter | Send message to the agent |
+| Shortcut    | Action                              |
+| ----------- | ----------------------------------- |
+| Enter       | Send message to the agent           |
 | Shift+Enter | Insert a new line (without sending) |
 
 #### Dialogs (Approval prompts, etc.)
 
-| Shortcut | Action |
-|----------|--------|
-| Enter | Approve / Submit |
-| Escape | Deny / Cancel / Close |
-| Ctrl+Enter | Submit editor dialog |
+| Shortcut   | Action                |
+| ---------- | --------------------- |
+| Enter      | Approve / Submit      |
+| Escape     | Deny / Cancel / Close |
+| Ctrl+Enter | Submit editor dialog  |
 
 These dialog shortcuts are especially useful during orchestration runs, where you may need to approve multiple file changes. Rather than clicking "Approve" each time, just press Enter.
 
@@ -4246,11 +4262,13 @@ Try switching between them to find your preference. The change applies instantly
 This is where you add API keys for AI providers. Each provider you configure unlocks its models in the Model Picker.
 
 Supported providers include:
+
 - **Anthropic** -- Claude models
 - **OpenAI** -- GPT models
 - **Google** -- Gemini models
 
 Your API keys are stored securely using your operating system's credential manager:
+
 - On **Windows**, keys are stored in Windows Credential Manager
 - On **macOS**, keys are stored in the Keychain
 - On **Linux**, keys use the system keyring
@@ -4492,21 +4510,25 @@ code quality. Prioritize by severity.
 The agent will read through your backend and frontend code and produce a prioritized list of findings. Common issues it might flag:
 
 **Security:**
+
 - SQL injection risks (though SQLite with parameterized queries is generally safe)
 - Missing input validation on API endpoints
 - CORS configuration that's too permissive for production
 
 **Performance:**
+
 - Missing database indexes on frequently queried columns
 - Frontend re-renders that could be optimized with `useMemo` or `useCallback`
 - API endpoints that fetch more data than needed
 
 **Error handling:**
+
 - API endpoints that don't handle database errors gracefully
 - Frontend code that doesn't show user-friendly error messages for failed requests
 - Missing try/catch blocks around async operations
 
 **Code quality:**
+
 - Inconsistent naming conventions
 - Functions that are too long and could be extracted
 - Missing TypeScript types or overly broad `any` types
@@ -4572,11 +4594,13 @@ git commit -m "feat: add due dates, README documentation, and code review fixes
 Take a moment to appreciate what you've built. Over the course of this tutorial, you created:
 
 **Three distinct applications:**
+
 - A static landing page with HTML, CSS, and JavaScript
 - A FastAPI backend with SQLite persistence and a full REST API
 - A React + TypeScript frontend with rich interactivity
 
 **Using these Tide Code features:**
+
 - The Dashboard for workspace management
 - The file tree and multi-tab editor for code navigation
 - The integrated terminal for running servers and commands
@@ -4619,34 +4643,34 @@ This tutorial covered the fundamentals, but there's much more to explore:
 
 ### Keyboard Shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| Ctrl+S | Save file |
-| Ctrl+Shift+P | Command Palette |
-| Ctrl+Shift+F | Search files |
-| Ctrl+` | Toggle terminal |
-| Ctrl+B | Toggle file tree |
-| Ctrl+T | New terminal |
-| Ctrl+W | Close tab |
-| Ctrl+D | Select next occurrence |
+| Shortcut     | Action                 |
+| ------------ | ---------------------- |
+| Ctrl+S       | Save file              |
+| Ctrl+Shift+P | Command Palette        |
+| Ctrl+Shift+F | Search files           |
+| Ctrl+`       | Toggle terminal        |
+| Ctrl+B       | Toggle file tree       |
+| Ctrl+T       | New terminal           |
+| Ctrl+W       | Close tab              |
+| Ctrl+D       | Select next occurrence |
 
 ### Tide Code Features Covered
 
-| Feature | Chapter |
-|---------|---------|
-| Dashboard & Workspaces | 1 |
-| File Tree & Editor | 1, 2 |
-| Terminal & Split Panes | 3, 6 |
-| Multi-tab Editing | 2, 4 |
-| AI Agent (Pi) | 5 |
-| Orchestration Pipeline | 7 |
-| Code Intelligence | 8 |
-| Skills & Extensions | 9 |
-| Sessions & Context | 10 |
-| Model Selection & Thinking | 10 |
-| Command Palette | 11 |
-| Settings & Themes | 11 |
-| CLI Command | 11 |
+| Feature                    | Chapter |
+| -------------------------- | ------- |
+| Dashboard & Workspaces     | 1       |
+| File Tree & Editor         | 1, 2    |
+| Terminal & Split Panes     | 3, 6    |
+| Multi-tab Editing          | 2, 4    |
+| AI Agent (Pi)              | 5       |
+| Orchestration Pipeline     | 7       |
+| Code Intelligence          | 8       |
+| Skills & Extensions        | 9       |
+| Sessions & Context         | 10      |
+| Model Selection & Thinking | 10      |
+| Command Palette            | 11      |
+| Settings & Themes          | 11      |
+| CLI Command                | 11      |
 
 ---
 
