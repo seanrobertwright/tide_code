@@ -39,7 +39,7 @@ dirs = "5"
 notify = { version = "7", features = ["macos_kqueue"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-keyring = "3"
+keyring = { version = "3", features = ["windows-native"] }
 winreg = "0.52"
 
 [features]

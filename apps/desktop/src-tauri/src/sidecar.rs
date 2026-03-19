@@ -25,11 +25,19 @@ fn inject_api_keys(cmd: &mut Command) -> Option<&'static str> {
     let mut first_provider = None;
 
     for (provider, keychain_name, env_var) in PROVIDER_KEYS {
-        if let Ok(Some(key)) = keychain::get_key(keychain_name) {
-            tracing::info!("Injecting {} from keychain", env_var);
-            cmd.env(env_var, key);
-            if first_provider.is_none() {
-                first_provider = Some(*provider);
+        match keychain::get_key(keychain_name) {
+            Ok(Some(key)) => {
+                tracing::info!("Injecting {} from keychain (key length: {})", env_var, key.len());
+                cmd.env(env_var, key);
+                if first_provider.is_none() {
+                    first_provider = Some(*provider);
+                }
+            }
+            Ok(None) => {
+                tracing::info!("No key found in keychain for {}", keychain_name);
+            }
+            Err(e) => {
+                tracing::warn!("Error reading keychain for {}: {}", keychain_name, e);
             }
         }
     }
@@ -50,47 +58,153 @@ fn inject_service_keys(cmd: &mut Command) {
 /// Resolve the Pi CLI path into a (program, args_prefix) pair suitable for Command::new().
 /// On Unix, this returns the script path directly.
 /// On Windows, .cmd wrappers can't be piped reliably, so we resolve the underlying
-/// Node.js entry point and return ("node", [script_path]).
+/// Node.js entry point and return ("node.exe_path", [script_path]).
 fn resolve_command(pi_path: &str) -> (String, Vec<String>) {
     #[cfg(windows)]
     {
+        // Strip \\?\ UNC prefix that canonicalize() adds on Windows
+        let pi_path_clean = pi_path.strip_prefix(r"\\?\").unwrap_or(pi_path);
+
         // If the resolved path is a .cmd file, parse it to find the JS entry point
-        if pi_path.ends_with(".cmd") {
-            if let Ok(contents) = std::fs::read_to_string(pi_path) {
+        if pi_path_clean.to_lowercase().ends_with(".cmd") {
+            tracing::info!("Attempting to resolve .cmd wrapper: {}", pi_path_clean);
+            if let Ok(contents) = std::fs::read_to_string(pi_path_clean) {
                 // Look for the node invocation pattern: node "path\to\cli.js" %*
                 // The .cmd file has lines like: node  "%~dp0\..\path\cli.js" %*
                 for line in contents.lines() {
                     let trimmed = line.trim();
                     // Find lines that invoke node with a .js file
-                    if let Some(rest) = trimmed.strip_prefix("node ").or_else(|| trimmed.strip_prefix("node.exe ")) {
+                    if let Some(rest) = trimmed.strip_prefix("node ").or_else(|| trimmed.strip_prefix("node.exe "))
+                        .or_else(|| trimmed.strip_prefix("\"node\" ").or_else(|| trimmed.strip_prefix("\"node.exe\" ")))
+                    {
                         let rest = rest.trim();
                         // Extract the JS path (may be in quotes with %~dp0)
-                        if let Some(js_path) = extract_js_path_from_cmd(rest, pi_path) {
+                        if let Some(js_path) = extract_js_path_from_cmd(rest, pi_path_clean) {
+                            tracing::info!("Candidate JS path: {}", js_path);
                             if PathBuf::from(&js_path).exists() {
-                                tracing::info!("Resolved Pi .cmd -> node {}", js_path);
-                                return ("node".to_string(), vec![js_path]);
+                                let node = resolve_node_exe(pi_path_clean);
+                                tracing::info!("Resolved Pi .cmd -> {} {}", node, js_path);
+                                return (node, vec![js_path]);
                             }
                         }
                     }
                 }
             }
             // Fallback: try conventional path relative to .cmd location
-            let cmd_dir = PathBuf::from(pi_path).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+            let cmd_dir = PathBuf::from(pi_path_clean).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
             if let Ok(entries) = glob_first(&cmd_dir.join(".."), ".pnpm/@mariozechner+pi-coding-agent@*/node_modules/@mariozechner/pi-coding-agent/dist/cli.js") {
                 if PathBuf::from(&entries).exists() {
-                    tracing::info!("Resolved Pi via glob -> node {}", entries);
-                    return ("node".to_string(), vec![entries]);
+                    let node = resolve_node_exe(pi_path_clean);
+                    tracing::info!("Resolved Pi via glob -> {} {}", node, entries);
+                    return (node, vec![entries]);
                 }
             }
-            tracing::warn!("Could not resolve .cmd to JS entry point, falling back to cmd /C: {}", pi_path);
-            return ("cmd".to_string(), vec!["/C".to_string(), pi_path.to_string()]);
+            // Last resort: try the known direct path from node_modules
+            let direct = PathBuf::from(pi_path_clean)
+                .parent()
+                .unwrap_or(std::path::Path::new("."))
+                .join("..")
+                .join("@mariozechner")
+                .join("pi-coding-agent")
+                .join("dist")
+                .join("cli.js");
+            if direct.exists() {
+                let resolved = direct.canonicalize()
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| direct.to_string_lossy().to_string());
+                // Strip UNC prefix from canonicalized path
+                let resolved = resolved.strip_prefix(r"\\?\").unwrap_or(&resolved).to_string();
+                let node = resolve_node_exe(pi_path_clean);
+                tracing::info!("Resolved Pi via direct path -> {} {}", node, resolved);
+                return (node, vec![resolved]);
+            }
+            tracing::warn!("Could not resolve .cmd to JS entry point, falling back to cmd /C: {}", pi_path_clean);
+            return ("cmd".to_string(), vec!["/C".to_string(), pi_path_clean.to_string()]);
         }
-        (pi_path.to_string(), vec![])
+        (pi_path_clean.to_string(), vec![])
     }
     #[cfg(not(windows))]
     {
         (pi_path.to_string(), vec![])
     }
+}
+
+/// Resolve the full path to node.exe on Windows.
+/// Checks: 1) node_modules/.bin/node.exe (pnpm shim), 2) common install locations, 3) falls back to "node"
+#[cfg(windows)]
+fn resolve_node_exe(cmd_path: &str) -> String {
+    // 1. Check alongside the .cmd file (pnpm sometimes places node.exe here)
+    if let Some(cmd_dir) = PathBuf::from(cmd_path).parent() {
+        let local_node = cmd_dir.join("node.exe");
+        if local_node.exists() {
+            let s = local_node.to_string_lossy().to_string();
+            tracing::info!("Found node.exe alongside .cmd: {}", s);
+            return s;
+        }
+    }
+
+    // 2. Walk up from the .cmd file to find the project root's node_modules/.bin/node.exe
+    //    (nvm-windows puts node.exe on the system PATH but it may not be inherited)
+
+    // 3. Check common Windows install paths
+    let candidates = [
+        // Standard Node.js installer
+        r"C:\Program Files\nodejs\node.exe",
+        r"C:\Program Files (x86)\nodejs\node.exe",
+    ];
+    for candidate in &candidates {
+        if PathBuf::from(candidate).exists() {
+            tracing::info!("Found node.exe at standard path: {}", candidate);
+            return candidate.to_string();
+        }
+    }
+
+    // 4. Check nvm-windows symlink and versioned directories
+    if let Some(home) = dirs::home_dir() {
+        // nvm-windows default symlink
+        let nvm_symlink = PathBuf::from(r"C:\Program Files\nodejs\node.exe");
+        if nvm_symlink.exists() {
+            return nvm_symlink.to_string_lossy().to_string();
+        }
+        // nvm-windows stores versions in AppData\Roaming\nvm\
+        let nvm_dir = home.join("AppData").join("Roaming").join("nvm");
+        if nvm_dir.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&nvm_dir) {
+                // Pick the latest version directory that contains node.exe
+                let mut versions: Vec<_> = entries.flatten()
+                    .filter(|e| e.path().join("node.exe").exists())
+                    .collect();
+                versions.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                if let Some(latest) = versions.first() {
+                    let node = latest.path().join("node.exe");
+                    let s = node.to_string_lossy().to_string();
+                    tracing::info!("Found node.exe via nvm-windows: {}", s);
+                    return s;
+                }
+            }
+        }
+    }
+
+    // 5. Try finding node.exe via the Windows PATH (using `where` equivalent)
+    if let Ok(output) = std::process::Command::new("cmd")
+        .args(["/C", "where", "node"])
+        .output()
+    {
+        if output.status.success() {
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            if let Some(first_line) = stdout.lines().next() {
+                let path = first_line.trim();
+                if !path.is_empty() && PathBuf::from(path).exists() {
+                    tracing::info!("Found node.exe via `where`: {}", path);
+                    return path.to_string();
+                }
+            }
+        }
+    }
+
+    // 6. Last resort — hope it's on PATH
+    tracing::warn!("Could not locate node.exe, falling back to bare 'node'");
+    "node".to_string()
 }
 
 /// Extract the JS file path from a .cmd line like: "%~dp0\..\path\cli.js" %*
@@ -109,10 +223,11 @@ fn extract_js_path_from_cmd(rest: &str, cmd_path: &str) -> Option<String> {
     let resolved = rest.replace("%~dp0", &format!("{}/", cmd_dir.replace('\\', "/")));
     // Normalize path separators
     let resolved = resolved.replace('\\', "/");
-    // Canonicalize
+    // Canonicalize and strip \\?\ UNC prefix that Windows adds
     let p = PathBuf::from(&resolved);
     if let Ok(canonical) = p.canonicalize() {
-        Some(canonical.to_string_lossy().to_string())
+        let s = canonical.to_string_lossy().to_string();
+        Some(s.strip_prefix(r"\\?\").unwrap_or(&s).to_string())
     } else {
         // Try as-is
         Some(resolved)
@@ -161,6 +276,40 @@ pub async fn start_pi(
         cmd.arg(arg);
     }
 
+    // On Windows, when calling node directly (bypassing .cmd wrapper),
+    // we need to set NODE_PATH so Pi can resolve its dependencies.
+    #[cfg(windows)]
+    if !prefix_args.is_empty() {
+        // The JS entry point is the first prefix arg — derive the package's node_modules
+        let js_path = PathBuf::from(&prefix_args[0]);
+        if let Some(pkg_dir) = js_path.parent().and_then(|p| p.parent()) {
+            let pkg_node_modules = pkg_dir.join("node_modules");
+            // Also include the .pnpm hoisted node_modules
+            let mut node_path_parts: Vec<String> = vec![];
+            if pkg_node_modules.exists() {
+                node_path_parts.push(pkg_node_modules.to_string_lossy().to_string());
+            }
+            // Walk up to find the .pnpm node_modules
+            let mut ancestor = pkg_dir.to_path_buf();
+            for _ in 0..5 {
+                if let Some(parent) = ancestor.parent() {
+                    let pnpm_modules = parent.join("node_modules");
+                    if pnpm_modules.exists() && !node_path_parts.contains(&pnpm_modules.to_string_lossy().to_string()) {
+                        node_path_parts.push(pnpm_modules.to_string_lossy().to_string());
+                    }
+                    ancestor = parent.to_path_buf();
+                } else {
+                    break;
+                }
+            }
+            if !node_path_parts.is_empty() {
+                let node_path = node_path_parts.join(";");
+                tracing::info!("Setting NODE_PATH={}", node_path);
+                cmd.env("NODE_PATH", node_path);
+            }
+        }
+    }
+
     // If using bundled sidecar, set PI_PACKAGE_DIR so the Bun binary
     // finds its assets (package.json, themes, docs, etc.) in the
     // Tauri resources directory instead of next to the executable.
@@ -187,7 +336,9 @@ pub async fn start_pi(
             .map(|h| h.join(".pi").join("agent").join("auth.json"));
         let has_pi_oauth = pi_auth_path
             .as_ref()
-            .map(|p| p.exists())
+            .and_then(|p| std::fs::read_to_string(p).ok())
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok())
+            .map(|val| val.as_object().map_or(false, |obj| !obj.is_empty()))
             .unwrap_or(false);
 
         if has_pi_oauth {
@@ -298,7 +449,7 @@ pub fn resolve_pi_path() -> Result<String, Box<dyn std::error::Error + Send + Sy
     // 3. Check node_modules/.bin/pi relative to project root (dev mode)
     //    On Windows, the binary is "pi.cmd"; on Unix it's "pi".
     #[cfg(windows)]
-    let bin_names = &["node_modules/.bin/pi.cmd", "node_modules/.bin/pi.exe"];
+    let bin_names = &["node_modules/.bin/pi.cmd", "node_modules/.bin/pi.CMD", "node_modules/.bin/pi.exe"];
     #[cfg(not(windows))]
     let bin_names = &["node_modules/.bin/pi"];
 

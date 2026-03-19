@@ -1,4 +1,4 @@
-# build-sidecar.ps1 — Compile Pi CLI into a standalone sidecar binary (Windows)
+# build-sidecar.ps1 - Compile Pi CLI into a standalone sidecar binary (Windows)
 #
 # Uses `bun build --compile` to create a single native executable from the
 # Pi CLI. The resulting binary has zero runtime dependencies (no Node.js needed).
@@ -15,7 +15,7 @@ $SidecarPath = Join-Path $BinDir $SidecarName
 $PiPkg = Join-Path $ProjectRoot "node_modules\@mariozechner\pi-coding-agent"
 $PiCli = Join-Path $PiPkg "dist\cli.js"
 if (-not (Test-Path $PiCli)) {
-    Write-Error "Pi CLI not found at $PiCli — run 'pnpm install' first."
+    Write-Error "Pi CLI not found at $PiCli - run 'pnpm install' first."
     exit 1
 }
 

@@ -1347,12 +1347,24 @@ async fn fs_delete(path: String) -> Result<(), String> {
 
 #[tauri::command]
 async fn keychain_set_key(provider: String, key: String) -> Result<(), String> {
-    keychain::set_key(&provider, &key)
+    tracing::info!("keychain_set_key called for provider: {} (key length: {})", provider, key.len());
+    let result = keychain::set_key(&provider, &key);
+    match &result {
+        Ok(()) => tracing::info!("keychain_set_key succeeded for {}", provider),
+        Err(e) => tracing::error!("keychain_set_key failed for {}: {}", provider, e),
+    }
+    result
 }
 
 #[tauri::command]
 async fn keychain_get_key(provider: String) -> Result<Option<String>, String> {
-    keychain::get_key(&provider)
+    let result = keychain::get_key(&provider);
+    match &result {
+        Ok(Some(_)) => tracing::info!("keychain_get_key: found key for {}", provider),
+        Ok(None) => tracing::info!("keychain_get_key: no key for {}", provider),
+        Err(e) => tracing::error!("keychain_get_key failed for {}: {}", provider, e),
+    }
+    result
 }
 
 #[tauri::command]
@@ -1737,6 +1749,16 @@ fn resolve_extension_paths() -> Vec<String> {
         "tide-planner", "tide-index", "tide-web-search", "tide-auth",
     ];
 
+    // Helper: canonicalize and strip \\?\ UNC prefix on Windows
+    let clean_canonicalize = |p: &std::path::Path| -> Option<String> {
+        p.canonicalize().ok().map(|abs| {
+            let s = abs.to_string_lossy().to_string();
+            #[cfg(windows)]
+            let s = s.strip_prefix(r"\\?\").unwrap_or(&s).to_string();
+            s
+        })
+    };
+
     // 1. Production: bundled pre-transpiled .js extensions in Resources/pi-extensions/
     if let Ok(exe) = std::env::current_exe() {
         if let Some(app_dir) = exe.parent() {
@@ -1745,8 +1767,8 @@ fn resolve_extension_paths() -> Vec<String> {
                 for name in &ext_names {
                     let p = resources.join(format!("{}.js", name));
                     if p.exists() {
-                        if let Ok(abs) = p.canonicalize() {
-                            paths.push(abs.to_string_lossy().to_string());
+                        if let Some(abs) = clean_canonicalize(&p) {
+                            paths.push(abs);
                         }
                     }
                 }
@@ -1770,8 +1792,8 @@ fn resolve_extension_paths() -> Vec<String> {
         for name in &ext_names {
             let p = dir.join(format!("{}.ts", name));
             if p.exists() {
-                if let Ok(abs) = p.canonicalize() {
-                    paths.push(abs.to_string_lossy().to_string());
+                if let Some(abs) = clean_canonicalize(&p) {
+                    paths.push(abs);
                 }
             }
         }
