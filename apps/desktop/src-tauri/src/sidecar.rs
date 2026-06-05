@@ -90,7 +90,7 @@ fn resolve_command(pi_path: &str) -> (String, Vec<String>) {
             }
             // Fallback: try conventional path relative to .cmd location
             let cmd_dir = PathBuf::from(pi_path_clean).parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
-            if let Ok(entries) = glob_first(&cmd_dir.join(".."), ".pnpm/@mariozechner+pi-coding-agent@*/node_modules/@mariozechner/pi-coding-agent/dist/cli.js") {
+            if let Ok(entries) = glob_first(&cmd_dir.join(".."), ".pnpm/@earendil-works+pi-coding-agent@*/node_modules/@earendil-works/pi-coding-agent/dist/cli.js") {
                 if PathBuf::from(&entries).exists() {
                     let node = resolve_node_exe(pi_path_clean);
                     tracing::info!("Resolved Pi via glob -> {} {}", node, entries);
@@ -102,7 +102,7 @@ fn resolve_command(pi_path: &str) -> (String, Vec<String>) {
                 .parent()
                 .unwrap_or(std::path::Path::new("."))
                 .join("..")
-                .join("@mariozechner")
+                .join("@earendil-works")
                 .join("pi-coding-agent")
                 .join("dist")
                 .join("cli.js");

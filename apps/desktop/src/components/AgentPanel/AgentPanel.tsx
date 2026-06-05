@@ -409,6 +409,33 @@ export function AgentPanel() {
   const composerRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Group consecutive tool_call messages for collapsed display. Memoized on `messages`
+  // so unrelated re-renders of this large panel (composer state, status changes) don't
+  // re-run the O(n) grouping; during streaming it recomputes as expected, while the
+  // memoized ChatBubble/ToolCallGroup children keep untouched messages from re-rendering.
+  const groupedMessages = useMemo(() => {
+    const elements: React.ReactNode[] = [];
+    let i = 0;
+    while (i < messages.length) {
+      const msg = messages[i];
+      if (msg.role === "tool_call") {
+        const group: ToolCallMessage[] = [];
+        while (i < messages.length && messages[i].role === "tool_call") {
+          group.push(messages[i] as ToolCallMessage);
+          i++;
+        }
+        elements.push(<ToolCallGroup key={group[0].id} tools={group} />);
+      } else {
+        const nextUserMsgIndex = msg.role === "assistant"
+          ? messages.slice(0, i + 1).filter((m) => m.role === "user").length
+          : -1;
+        elements.push(<ChatBubble key={msg.id} message={msg} userMessageIndex={nextUserMsgIndex} />);
+        i++;
+      }
+    }
+    return elements;
+  }, [messages]);
+
   // Stall detection: check every 5s while orchestration is active
   useEffect(() => {
     const isActive = orcPhase !== "idle" && orcPhase !== "complete" && orcPhase !== "failed";
@@ -803,30 +830,7 @@ export function AgentPanel() {
               <EmptyState />
             ) : (
               <div style={s.messageList}>
-                {(() => {
-                  // Group consecutive tool_call messages for collapsed display
-                  const elements: React.ReactNode[] = [];
-                  let i = 0;
-                  while (i < messages.length) {
-                    const msg = messages[i];
-                    if (msg.role === "tool_call") {
-                      // Collect consecutive tool calls
-                      const group: ToolCallMessage[] = [];
-                      while (i < messages.length && messages[i].role === "tool_call") {
-                        group.push(messages[i] as ToolCallMessage);
-                        i++;
-                      }
-                      elements.push(<ToolCallGroup key={group[0].id} tools={group} />);
-                    } else {
-                      const nextUserMsgIndex = msg.role === "assistant"
-                        ? messages.slice(0, i + 1).filter(m => m.role === "user").length
-                        : -1;
-                      elements.push(<ChatBubble key={msg.id} message={msg} userMessageIndex={nextUserMsgIndex} />);
-                      i++;
-                    }
-                  }
-                  return elements;
-                })()}
+                {groupedMessages}
                 {clarifyQuestions && clarifyInputRequestId && (
                   <ClarifyCard questions={clarifyQuestions} />
                 )}

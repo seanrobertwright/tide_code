@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -322,7 +322,7 @@ export default function tidePlanner(pi: ExtensionAPI) {
           assignedModel: Type.Optional(
             Type.Object({
               provider: Type.String({ description: "Model provider (e.g. openai, anthropic)" }),
-              id: Type.String({ description: "Model ID (e.g. gpt-5, claude-sonnet-4-6)" }),
+              id: Type.String({ description: "Model ID (e.g. claude-opus-4-8, claude-sonnet-4-6, gpt-5.5-codex)" }),
               name: Type.String({ description: "Display name" }),
             }),
           ),

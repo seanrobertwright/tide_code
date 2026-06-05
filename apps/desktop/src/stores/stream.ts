@@ -895,8 +895,14 @@ export const useStreamStore = create<StreamState>((set, get) => ({
               const id = String(m.id || "");
               set({ modelName: name, modelProvider: provider, modelId: id });
               if (m.contextWindow) {
-                set({ contextWindow: Number(m.contextWindow) });
+                const win = Number(m.contextWindow);
+                set({ contextWindow: win });
+                // Update the budget immediately so the dial reflects the new model's
+                // window even while idle (no context event fires until the next turn).
+                // The Pi-authored snapshot remains the source of truth on the next turn.
+                useContextStore.getState().updateBudget(win);
               }
+              useContextStore.getState().refreshFromSnapshot();
             }
             break;
           }

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { keychainSetKey, keychainDeleteKey, keychainHasKey } from "../../lib/keychain";
 import { restartPi, oauthListProviders, oauthLogout, ptyCreate, ptyWrite, type OAuthProviderStatus } from "../../lib/ipc";
 import { useTerminalStore } from "../../stores/terminalStore";
+import { LocalModelsSettings } from "./LocalModelsSettings";
 
 interface ProviderConfig {
   id: string;
@@ -24,7 +25,7 @@ const SUBSCRIPTION_PROVIDERS: { id: string; name: string; description: string }[
   { id: "openai-codex", name: "OpenAI Codex", description: "ChatGPT Plus/Pro subscription" },
   { id: "anthropic", name: "Anthropic Max", description: "Claude Pro/Max subscription" },
   { id: "copilot", name: "GitHub Copilot", description: "GitHub Copilot subscription" },
-  { id: "google-gemini-cli", name: "Google Gemini CLI", description: "Google Gemini subscription" },
+  // Google Gemini CLI / Antigravity OAuth providers were removed in pi 0.71 — no longer supported.
 ];
 
 // Inject spin keyframe once
@@ -315,7 +316,7 @@ export function ProviderSettings() {
 
       {needsRestart && (
         <div style={s.restartBanner}>
-          <span>Authentication changed. Restart the agent to apply.</span>
+          <span>Configuration changed. Restart the agent to apply.</span>
           <button
             style={s.restartBtn}
             onClick={handleRestart}
@@ -360,6 +361,8 @@ export function ProviderSettings() {
       <div style={s.list}>
         {SERVICES.map((service) => renderKeyCard(service))}
       </div>
+
+      <LocalModelsSettings onChanged={() => setNeedsRestart(true)} />
     </div>
   );
 }

@@ -1,10 +1,10 @@
 {
-  "version": "0.1.0",
-  "notes": "v0.1.0",
-  "pub_date": "2026-04-26T13:51:31Z",
+  "version": "0.1.1",
+  "notes": "v0.1.1",
+  "pub_date": "2026-04-27T05:32:40Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUdWJWeGE1S3F0UXB6K3lXOUd6enNITTJDTmt3S1pIL1VVVklDRWlGS2JYZTVteDNOeFpzcGtIVWhaak4yVHJwZUtYMnFKamUxajMyVmpQVjFXR0FwazY2M21yeXpPOUFnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc3MjExNjI5CWZpbGU6VGlkZUNvZGUuYXBwLnRhci5negoxK1U2QjIvQlhCUlc3K2Y0NW9jclJDWWxrOCtNekQ5YnRBRFFMMjBJMU1YNmFIM3dBMUdlOXh6ZkRMRTc0VmdzZjlpYWRPUXh4aWV2dG8rZEd5RHpBUT09Cg==",
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUdWJWeGE1S3F0UXRrQi83Smx3TFBzUytwdEZZblpxRnZ2SmFVQnNlc2xwU2FKSUJqR2ZjeWFuSENtNWlNaGU2RVJHNzRtWE9lTWNYKzRVeElNdnRRUzIxcG42cElCdEFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzc3MjY4MTEyCWZpbGU6VGlkZUNvZGUuYXBwLnRhci5negpZbFpVTkswUDZ5TnZxYnZBREtxZ1YrdEZ6U01uVHA3VU9WVXRKSmhQQXZFSDk0VDF0ODE3UXdGY1RNSnBDVHJYZDlsRFBYa3NoQzlUOXVqK0tpdmNBUT09Cg==",
       "url": "https://pub-7b3e5bbd605d43adbeb4601a962d84bd.r2.dev/tidecode/TideCode.app.tar.gz"
     }
   }

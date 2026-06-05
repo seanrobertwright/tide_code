@@ -14,7 +14,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
   type PersistentAgent,
@@ -95,7 +95,24 @@ function globalExpertsDir(): string {
   return path.join(home, ".tide", "experts");
 }
 
+// Expert names become path segments and may carry a model id — keep them to a safe
+// charset to prevent path traversal (e.g. "../../etc/passwd") and injection.
+const SAFE_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+function isSafeExpertName(name: string): boolean {
+  return SAFE_NAME_RE.test(name) && !name.includes("..") && name.length <= 64;
+}
+// Model ids ("provider/id") are passed to Pi when spawning agents — reject anything
+// outside the expected charset rather than forwarding arbitrary strings.
+function isSafeModelId(provider: string, id: string): boolean {
+  const re = /^[A-Za-z0-9][A-Za-z0-9._:-]*$/;
+  return re.test(provider) && re.test(id) && provider.length <= 64 && id.length <= 128;
+}
+
 function loadExpertConfig(cwd: string, name: string): ExpertConfig | null {
+  if (!isSafeExpertName(name)) {
+    process.stderr.write(`[tide:experts] Rejected unsafe expert name: ${JSON.stringify(name)}\n`);
+    return null;
+  }
   let filePath = path.join(expertsDir(cwd), "experts", `${name}.md`);
   // Fall back to global experts dir
   if (!fs.existsSync(filePath)) {
@@ -149,6 +166,11 @@ function loadExpertConfig(cwd: string, name: string): ExpertConfig | null {
     model = { provider, id: rest.join("/") };
   } else if (config.model?.provider && config.model?.id) {
     model = config.model;
+  }
+  // Drop a malformed/unsafe model id rather than forwarding it to Pi (falls back to default).
+  if (model && !isSafeModelId(model.provider, model.id)) {
+    process.stderr.write(`[tide:experts] Ignored unsafe model id for expert ${name}: ${model.provider}/${model.id}\n`);
+    model = undefined;
   }
 
   return {
@@ -517,8 +539,12 @@ async function runBrainstormSession(opts: {
     const warningMs = timeLimitMs * 0.8;
     let warningIssued = false;
     let timeLimitHit = false;
+    // Guards the interval body from acting on already-killed agents if a tick fires
+    // during/after the finally-block cleanup. Set false before clearInterval.
+    let timerActive = true;
 
     const timerInterval = setInterval(() => {
+      if (!timerActive) return;
       const elapsed = Date.now() - startTime;
 
       if (elapsed >= timeLimitMs && !timeLimitHit) {
@@ -541,9 +567,10 @@ async function runBrainstormSession(opts: {
           const synth = buildSynthesisInstructions(team.outputMode || "execute");
           leaderTimeLimitAgent.steer(
             "[TIME LIMIT REACHED] The brainstorming time limit has expired. " +
-            "Read all messages and the shared findings board. " +
+            "ABORT whatever you are currently doing and synthesize NOW from the inbox " +
+            "and the shared findings board — do not start any new analysis or wait for replies. " +
             synth.brief + " Note any unresolved threads. " +
-            'Broadcast your synthesis: type="observation", content="[SYNTHESIS] {your synthesis}"'
+            'Broadcast your synthesis immediately: type="observation", content="[SYNTHESIS] {your synthesis}"'
           );
         }
       } else if (elapsed >= warningMs && !warningIssued) {
@@ -679,40 +706,34 @@ async function runBrainstormSession(opts: {
           es.status = "done";
         }
 
-        // Collect synthesis from leader's outbox
+        // Collect synthesis from leader's outbox (single read). Prefer a message tagged
+        // with the explicit [SYNTHESIS] marker (high confidence). If the leader never
+        // emitted the marker, fall back to its most recent broadcast (low confidence) and
+        // flag it so the UI can warn that the synthesis may be incomplete.
         const judgeOutbox = path.join(sessionDir, "mailboxes", "leader", "outbox");
         if (fs.existsSync(judgeOutbox)) {
           const files = fs.readdirSync(judgeOutbox).filter(f => f.endsWith(".json")).sort().reverse();
-          for (const f of files) {
-            try {
-              const msg = JSON.parse(fs.readFileSync(path.join(judgeOutbox, f), "utf-8"));
-              if (msg.content?.includes("[SYNTHESIS]")) {
-                state.synthesis = {
-                  raw: msg.content.replace("[SYNTHESIS]", "").trim(),
-                  judge: "leader",
-                  timestamp: msg.timestamp,
-                };
-                break;
-              }
-            } catch { /* skip */ }
-          }
-        }
-
-        // Fallback: use the judge's last broadcast as synthesis
-        if (!state.synthesis) {
-          const judgeOutboxFallback = path.join(sessionDir, "mailboxes", "leader", "outbox");
-          if (fs.existsSync(judgeOutboxFallback)) {
-            const files = fs.readdirSync(judgeOutboxFallback).filter(f => f.endsWith(".json")).sort().reverse();
-            if (files.length > 0) {
-              try {
-                const msg = JSON.parse(fs.readFileSync(path.join(judgeOutboxFallback, files[0]), "utf-8"));
-                state.synthesis = {
-                  raw: msg.content,
-                  judge: "leader",
-                  timestamp: msg.timestamp,
-                };
-              } catch { /* ignore */ }
-            }
+          const msgs = files
+            .map(f => { try { return JSON.parse(fs.readFileSync(path.join(judgeOutbox, f), "utf-8")); } catch { return null; } })
+            .filter(Boolean);
+          const marked = msgs.find(m => m.content?.includes("[SYNTHESIS]"));
+          if (marked) {
+            state.synthesis = {
+              raw: marked.content.replace("[SYNTHESIS]", "").trim(),
+              judge: "leader",
+              timestamp: marked.timestamp,
+              confidence: "high",
+              isFallback: false,
+            };
+          } else if (msgs.length > 0) {
+            state.synthesis = {
+              raw: msgs[0].content,
+              judge: "leader",
+              timestamp: msgs[0].timestamp,
+              confidence: "low",
+              isFallback: true,
+            };
+            log("Synthesis [SYNTHESIS] marker missing — using leader's last broadcast as fallback.");
           }
         }
       }
@@ -740,6 +761,7 @@ async function runBrainstormSession(opts: {
       onPhaseChange?.("ready", "Brainstorming complete!");
 
     } finally {
+      timerActive = false;
       clearInterval(timerInterval);
     }
 

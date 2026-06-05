@@ -12,7 +12,7 @@
     "test": "pnpm --filter @tide/desktop test"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.19.0"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -21,7 +21,7 @@
     ]
   },
   "dependencies": {
-    "@mariozechner/pi-coding-agent": "^0.70.2",
+    "@earendil-works/pi-coding-agent": "^0.78.1",
     "better-sqlite3": "^11.0.0",
     "typebox": "^1.1.24"
   }

@@ -57,6 +57,14 @@ export function SynthesisView({ onExecute }: { onExecute?: () => Promise<void> }
         {timeLimitReached && (
           <span style={s.timeLimitBadge}>Time limit reached</span>
         )}
+        {synthesis.isFallback && (
+          <span
+            style={s.fallbackBadge}
+            title="The leader did not emit an explicit [SYNTHESIS] marker. This is its last message and may be incomplete."
+          >
+            Unverified
+          </span>
+        )}
       </div>
 
       {/* Judge info */}
@@ -192,6 +200,16 @@ const s: Record<string, React.CSSProperties> = {
     padding: "1px 6px",
     borderRadius: "var(--radius-sm)",
     fontWeight: 500,
+  },
+  fallbackBadge: {
+    fontFamily: "var(--font-mono)",
+    fontSize: 10,
+    color: "var(--error, #e06c75)",
+    backgroundColor: "rgba(224, 108, 117, 0.15)",
+    padding: "1px 6px",
+    borderRadius: "var(--radius-sm)",
+    fontWeight: 500,
+    cursor: "help",
   },
   judgeLine: {
     display: "flex",

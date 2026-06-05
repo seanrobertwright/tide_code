@@ -87,8 +87,13 @@ export const useContextStore = create<ContextState>((set, get) => ({
       const totalTokens = snapshot?.totalTokens ?? 0;
       const categories = snapshot?.categories ?? [];
       const existing = get().breakdown;
-      // Use existing budgetTokens, or fall back to stream store's contextWindow
-      let budgetTokens = existing?.budgetTokens ?? 0;
+      // Budget (denominator) is Pi-authoritative: prefer the current model's context
+      // window from the snapshot. This is correct in every scenario — including after
+      // the router auto-switches models — because Pi computes it for the active model.
+      // Fall back to last-known, then the stream store's contextWindow (transient,
+      // only before the first snapshot arrives).
+      let budgetTokens = snapshot?.contextWindow && snapshot.contextWindow > 0 ? snapshot.contextWindow : 0;
+      if (budgetTokens === 0) budgetTokens = existing?.budgetTokens ?? 0;
       if (budgetTokens === 0) {
         try {
           // Lazy import to avoid circular dependency
@@ -96,7 +101,11 @@ export const useContextStore = create<ContextState>((set, get) => ({
           budgetTokens = useStreamStore.getState().contextWindow || 0;
         } catch { /* ignore */ }
       }
-      const usagePercent = budgetTokens > 0 ? totalTokens / budgetTokens : 0;
+      // Percent is also Pi-authoritative when available; otherwise derive from tokens/budget.
+      // `percent` is null right after compaction (tokens unknown) — keep last-known then.
+      const usagePercent = (typeof snapshot?.percent === "number")
+        ? snapshot.percent
+        : (budgetTokens > 0 ? totalTokens / budgetTokens : (existing?.usagePercent ?? 0));
       set({
         breakdown: {
           totalTokens,

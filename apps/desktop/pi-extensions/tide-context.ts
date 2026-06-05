@@ -1,4 +1,4 @@
-import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -11,6 +11,10 @@ interface CategoryBreakdown {
 interface ContextSnapshot {
   categories: CategoryBreakdown[];
   totalTokens: number;
+  /** Authoritative context window of the CURRENT model, from Pi (0 if unknown). */
+  contextWindow: number;
+  /** Authoritative usage fraction (0-1) from Pi, or null right after compaction. */
+  percent: number | null;
   timestamp: string;
 }
 
@@ -67,6 +71,7 @@ function writeSnapshotAtomic(workspaceRoot: string, snapshot: ContextSnapshot): 
 
 export default function tideContext(pi: ExtensionAPI) {
   let lastSnapshotTokens = 0;
+  let lastContextWindow = 0;
 
   pi.on("context", async (event, ctx) => {
     const workspaceRoot = ctx.cwd;
@@ -112,6 +117,17 @@ export default function tideContext(pi: ExtensionAPI) {
       ? piUsage.tokens
       : heuristicTotal;
 
+    // Pi is the single source of truth for the budget (current model's window) and
+    // the usage fraction. Because Pi computes these for whatever model is active —
+    // including after the model router auto-switches mid-session — the indicator
+    // stays accurate without the frontend reconstructing it from RPC model events.
+    // `contextWindow` is 0 and `percent` is null when Pi can't report (e.g. before the
+    // first LLM response or right after compaction); the frontend keeps last-known values.
+    const contextWindow = (piUsage && typeof piUsage.contextWindow === "number" && piUsage.contextWindow > 0)
+      ? piUsage.contextWindow
+      : 0;
+    const percent = (piUsage && typeof piUsage.percent === "number") ? piUsage.percent : null;
+
     const categories: CategoryBreakdown[] = [];
     if (systemTokens > 0) {
       categories.push({ category: "System Prompt", tokens: systemTokens, percentage: totalTokens > 0 ? systemTokens / totalTokens : 0 });
@@ -124,15 +140,22 @@ export default function tideContext(pi: ExtensionAPI) {
     }
     categories.push({ category: "Tool Definitions", tokens: toolDefTokens, percentage: totalTokens > 0 ? toolDefTokens / totalTokens : 0 });
 
-    // Write snapshot for frontend consumption (throttled: only if >5% change)
+    // Write snapshot for frontend consumption. Throttle on token change (>5%), but
+    // ALWAYS write when the context window changes — that's a model switch (e.g. the
+    // router moving to a different-window model), and the budget denominator must
+    // update immediately so the indicator doesn't show a stale percentage.
     const delta = Math.abs(totalTokens - lastSnapshotTokens);
-    if (lastSnapshotTokens === 0 || delta / Math.max(lastSnapshotTokens, 1) > 0.05) {
+    const windowChanged = contextWindow > 0 && contextWindow !== lastContextWindow;
+    if (lastSnapshotTokens === 0 || windowChanged || delta / Math.max(lastSnapshotTokens, 1) > 0.05) {
       writeSnapshotAtomic(workspaceRoot, {
         categories,
         totalTokens,
+        contextWindow,
+        percent,
         timestamp: new Date().toISOString(),
       });
       lastSnapshotTokens = totalTokens;
+      if (contextWindow > 0) lastContextWindow = contextWindow;
     }
 
     // --- Filter excluded messages ---

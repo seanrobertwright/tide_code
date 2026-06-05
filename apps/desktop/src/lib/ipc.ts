@@ -153,6 +153,10 @@ export async function getMessages(): Promise<void> {
 export interface ContextBreakdownSnapshot {
   categories: { category: string; tokens: number; percentage: number }[];
   totalTokens: number;
+  /** Authoritative context window of the current model, from Pi (0/absent if unknown). */
+  contextWindow?: number;
+  /** Authoritative usage fraction (0-1) from Pi, or null right after compaction. */
+  percent?: number | null;
   timestamp?: string;
 }
 
@@ -242,6 +246,62 @@ export async function writeRouterConfig(
     orchestratorModels: orchestratorModels ?? null,
     subagentModels: subagentModels ?? null,
   });
+}
+
+// ── Local / custom model providers (~/.pi/agent/models.json) ───────────────
+
+/** A Pi API protocol a custom provider can speak. */
+export type PiApiType =
+  | "openai-completions"
+  | "openai-responses"
+  | "anthropic-messages"
+  | "google-generative-ai";
+
+export interface PiModelsJson {
+  providers?: Record<string, {
+    baseUrl?: string;
+    api?: string;
+    apiKey?: string;
+    models?: { id: string }[];
+    compat?: { supportsDeveloperRole?: boolean; supportsReasoningEffort?: boolean };
+  }>;
+  [key: string]: unknown;
+}
+
+/** Read ~/.pi/agent/models.json (custom/local providers). */
+export async function readPiModelsJson(): Promise<PiModelsJson> {
+  return invoke<PiModelsJson>("read_pi_models_json");
+}
+
+/** Add or replace a custom/local provider, preserving the user's other providers. */
+export async function writePiLocalProvider(opts: {
+  providerId: string;
+  baseUrl: string;
+  api: PiApiType;
+  apiKey?: string;
+  models: string[];
+  supportsDeveloperRole?: boolean;
+  supportsReasoningEffort?: boolean;
+}): Promise<void> {
+  await invoke("write_pi_local_provider", {
+    providerId: opts.providerId,
+    baseUrl: opts.baseUrl,
+    api: opts.api,
+    apiKey: opts.apiKey ?? null,
+    models: opts.models,
+    supportsDeveloperRole: opts.supportsDeveloperRole ?? null,
+    supportsReasoningEffort: opts.supportsReasoningEffort ?? null,
+  });
+}
+
+/** Remove a custom provider from ~/.pi/agent/models.json. */
+export async function removePiProvider(providerId: string): Promise<void> {
+  await invoke("remove_pi_provider", { providerId });
+}
+
+/** Probe a running Ollama instance; returns installed model ids. Throws if unreachable. */
+export async function detectOllama(baseUrl?: string): Promise<string[]> {
+  return invoke<string[]>("detect_ollama", { baseUrl: baseUrl ?? null });
 }
 
 // ── Pi Agent: Context Management ───────────────────────────
@@ -698,7 +758,15 @@ export interface ExpertsSessionState {
     messageCount: number;
     findingCount: number;
   }[];
-  synthesis: { raw: string; judge: string; timestamp: string } | null;
+  synthesis: {
+    raw: string;
+    judge: string;
+    timestamp: string;
+    /** "high" when the leader emitted an explicit [SYNTHESIS] marker, "low" for the fallback. */
+    confidence?: "high" | "low";
+    /** True when the [SYNTHESIS] marker was missing and the last broadcast was used instead. */
+    isFallback?: boolean;
+  } | null;
   timeLimitReached: boolean;
   usage: { inputTokens: number; outputTokens: number };
   createdAt: string;

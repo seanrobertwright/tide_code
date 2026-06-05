@@ -282,9 +282,9 @@ fn get_version_info() -> Result<serde_json::Value, String> {
     let tide_version = env!("CARGO_PKG_VERSION");
 
     // Try to read Pi version from node_modules package.json
-    let pi_version = ["node_modules/@mariozechner/pi-coding-agent/package.json",
-                       "../../node_modules/@mariozechner/pi-coding-agent/package.json",
-                       "../../../node_modules/@mariozechner/pi-coding-agent/package.json"]
+    let pi_version = ["node_modules/@earendil-works/pi-coding-agent/package.json",
+                       "../../node_modules/@earendil-works/pi-coding-agent/package.json",
+                       "../../../node_modules/@earendil-works/pi-coding-agent/package.json"]
         .iter()
         .find_map(|p| std::fs::read_to_string(p).ok())
         .and_then(|contents| {
@@ -829,6 +829,154 @@ async fn write_router_config(
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+// ── Local / custom model providers (~/.pi/agent/models.json) ────────────────
+//
+// Pi discovers custom providers (Ollama, LM Studio, vLLM, OpenAI-compatible proxies)
+// from ~/.pi/agent/models.json. Tide drives Pi, so anything written here appears in
+// Tide's model picker and is routable after a Pi restart. These commands let the UI
+// read/merge/remove providers without the user hand-editing JSON, and detect a running
+// Ollama instance for one-click setup.
+
+fn pi_models_json_path() -> std::path::PathBuf {
+    tide_home_dir().join(".pi").join("agent").join("models.json")
+}
+
+/// Read ~/.pi/agent/models.json (or an empty `{ "providers": {} }` if absent).
+#[tauri::command]
+async fn read_pi_models_json() -> Result<serde_json::Value, String> {
+    let path = pi_models_json_path();
+    if !path.exists() {
+        return Ok(serde_json::json!({ "providers": {} }));
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut value: serde_json::Value = serde_json::from_str(&content)
+        .map_err(|e| format!("models.json is not valid JSON: {e}"))?;
+    if !value.get("providers").map(|p| p.is_object()).unwrap_or(false) {
+        value["providers"] = serde_json::json!({});
+    }
+    Ok(value)
+}
+
+/// Add or replace one custom provider in ~/.pi/agent/models.json, preserving all
+/// other providers and top-level keys. `models` is the list of model ids exposed by
+/// the provider. Compat flags are only written when set (for OpenAI-compatible local
+/// servers that don't support the `developer` role or `reasoning_effort`).
+#[tauri::command]
+async fn write_pi_local_provider(
+    provider_id: String,
+    base_url: String,
+    api: String,
+    api_key: Option<String>,
+    models: Vec<String>,
+    supports_developer_role: Option<bool>,
+    supports_reasoning_effort: Option<bool>,
+) -> Result<(), String> {
+    if provider_id.trim().is_empty() {
+        return Err("Provider id is required".into());
+    }
+    let path = pi_models_json_path();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+
+    // Read-merge-write so we never clobber the user's other providers.
+    let mut root: serde_json::Value = if path.exists() {
+        let content = std::fs::read_to_string(&path).unwrap_or_default();
+        serde_json::from_str(&content).map_err(|e| format!("models.json is not valid JSON: {e}"))?
+    } else {
+        serde_json::json!({})
+    };
+    if !root.get("providers").map(|p| p.is_object()).unwrap_or(false) {
+        root["providers"] = serde_json::json!({});
+    }
+
+    let model_entries: Vec<serde_json::Value> = models
+        .iter()
+        .map(|id| id.trim())
+        .filter(|id| !id.is_empty())
+        .map(|id| serde_json::json!({ "id": id }))
+        .collect();
+
+    let mut provider = serde_json::Map::new();
+    provider.insert("baseUrl".into(), serde_json::json!(base_url));
+    provider.insert("api".into(), serde_json::json!(api));
+    // Pi requires an apiKey field even when the local server ignores it.
+    let key = api_key.filter(|k| !k.trim().is_empty()).unwrap_or_else(|| "local".into());
+    provider.insert("apiKey".into(), serde_json::json!(key));
+    provider.insert("models".into(), serde_json::json!(model_entries));
+
+    if supports_developer_role == Some(false) || supports_reasoning_effort == Some(false) {
+        let mut compat = serde_json::Map::new();
+        if supports_developer_role == Some(false) {
+            compat.insert("supportsDeveloperRole".into(), serde_json::json!(false));
+        }
+        if supports_reasoning_effort == Some(false) {
+            compat.insert("supportsReasoningEffort".into(), serde_json::json!(false));
+        }
+        provider.insert("compat".into(), serde_json::Value::Object(compat));
+    }
+
+    root["providers"][provider_id] = serde_json::Value::Object(provider);
+
+    std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Remove a custom provider from ~/.pi/agent/models.json.
+#[tauri::command]
+async fn remove_pi_provider(provider_id: String) -> Result<(), String> {
+    let path = pi_models_json_path();
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let mut root: serde_json::Value =
+        serde_json::from_str(&content).map_err(|e| format!("models.json is not valid JSON: {e}"))?;
+    if let Some(providers) = root.get_mut("providers").and_then(|p| p.as_object_mut()) {
+        providers.remove(&provider_id);
+    }
+    std::fs::write(&path, serde_json::to_string_pretty(&root).unwrap())
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Probe a running Ollama instance and return the ids of locally-installed models.
+/// Defaults to the standard local endpoint; returns an error string the UI can show
+/// (e.g. "not running") without throwing.
+#[tauri::command]
+async fn detect_ollama(base_url: Option<String>) -> Result<Vec<String>, String> {
+    let base = base_url
+        .filter(|b| !b.trim().is_empty())
+        .unwrap_or_else(|| "http://localhost:11434".into());
+    let url = format!("{}/api/tags", base.trim_end_matches('/'));
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_millis(1500))
+        .build()
+        .map_err(|e| e.to_string())?;
+
+    let resp = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|_| "Ollama not reachable (is it running on this endpoint?)".to_string())?;
+    if !resp.status().is_success() {
+        return Err(format!("Ollama responded with status {}", resp.status()));
+    }
+    let body: serde_json::Value = resp.json().await.map_err(|e| e.to_string())?;
+    let models = body
+        .get("models")
+        .and_then(|m| m.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|m| m.get("name").and_then(|n| n.as_str()).map(String::from))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    Ok(models)
 }
 
 /// Read orchestrator config from .tide/orchestrator-config.json.
@@ -2777,6 +2925,10 @@ pub fn run() {
             export_session_html,
             read_router_config,
             write_router_config,
+            read_pi_models_json,
+            write_pi_local_provider,
+            remove_pi_provider,
+            detect_ollama,
             read_orchestrator_config,
             write_orchestrator_config,
             set_auto_compaction,
